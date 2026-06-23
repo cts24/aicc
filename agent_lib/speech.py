@@ -15,6 +15,58 @@ _EN_FAREWELL_RE = re.compile(
 )
 
 
+# ── Urdu gender detection ───────────────────────────────────────────────────
+_MALE_VERBS = re.compile(
+    r'\b(?:'
+    r'میں\s+\S*\s*(?:گیا|چاہتا|کرتا\s*ہوں|رہا\s*ہوں|آیا|لیا|بتایا|'
+    r'دیکھا|سنا|بولا|پوچھتا|جاتا|آتا|سکتا|ہوتا|لگتا|'
+    r'لے\s*گیا|کہا|پڑھا|سمجھا|مانگا)'
+    r'|چاہتا\s*ہوں|کرتا\s*ہوں|رہا\s*ہوں|سکتا\s*ہوں'
+    r')\b',
+    re.UNICODE,
+)
+
+_FEMALE_VERBS = re.compile(
+    r'\b(?:'
+    r'میں\s+\S*\s*(?:گئی|چاہتی|کرتی\s*ہوں|رہی\s*ہوں|آئی|لی|بتائی|'
+    r'دیکھی|سنی|بولتی|پوچھتی|جاتی|آتی|سکتی|ہوتی|لگتی|'
+    r'لے\s*گئی|کہا|پڑھا|سمجھی|مانگا)'
+    r'|چاہتی\s*ہوں|کرتی\s*ہوں|رہی\s*ہوں|سکتی\s*ہوں'
+    r')\b',
+    re.UNICODE,
+)
+
+# Common Pakistani male name endings
+_MALE_NAME_MARKERS = re.compile(
+    r'\b(?:احمد|محمد|علی|حسین|حسن|عمر|عثمان|بلال|خالد|'
+    r'اطہر|طلحہ|سعد|حمزہ|ذیشان|فواد|فیصل|عامر|'
+    r'طاہر|ناصر|وحید|رشید|جمیل|کاشف|شاہد|'
+    r'عدنان|اسلم|اکرم|انور|ارشد|اعجاز)\b',
+    re.UNICODE,
+)
+
+_FEMALE_NAME_MARKERS = re.compile(
+    r'\b(?:فاطمہ|عائشہ|مریم|زینب|خدیجہ|سلمیٰ|'
+    r'سارہ|نادیہ|عصمت|رباب|ثروت|شاہدہ|'
+    r'نسیم|ربعہ|نصرت|عظمیٰ|بلقیس|گوہر|'
+    r'کنول|شمیم|خوارہ|عذرا|بشریٰ)\b',
+    re.UNICODE,
+)
+
+
+def detect_caller_gender(text: str) -> str:
+    """Detect caller gender from Urdu text. Returns 'male', 'female', or ''."""
+    if _MALE_VERBS.search(text):
+        return "male"
+    if _FEMALE_VERBS.search(text):
+        return "female"
+    if _MALE_NAME_MARKERS.search(text):
+        return "male"
+    if _FEMALE_NAME_MARKERS.search(text):
+        return "female"
+    return ""
+
+
 def is_farewell_response(text: str, lang: str = "ur") -> bool:
     if lang == "en":
         return bool(_EN_FAREWELL_RE.search(text))

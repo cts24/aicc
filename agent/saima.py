@@ -25,6 +25,7 @@ from agent_lib import (
     setup_log, normalize_phone,
     AS_HANGUP, AS_UUID, AS_AUDIO, AS_AUDIO_SLIN16, AS_ERROR, pack_frame, read_frame, downsample_16k_to_8k,
     is_farewell_response, strip_gap_words, urdu_phonetic,
+    detect_caller_gender,
     AMIClient, get_caller_id,
     chatwoot_lookup, create_chatwoot_lead,
     send_ntfy_notification, send_gmail_notification, book_sales_appointment,
@@ -142,6 +143,18 @@ You: "3 din se order nahi aaya — تو میں دیکھ لیتی ہوں"
 - 1-2 baar rukna dikhayein ("دیکھیں، اہ —")
 - Punjabi match karein agar caller Punjabi bole
 - Kabhi bhi "اور کچھ؟" mat bolein — "کچھ اور بتاؤں" zyada natural
+
+### Caller gender — verb forms match karein
+
+Aap Saima hain (feminine) — apne liye feminine verbs use karti hain. Lekin CALLER ke liye unki gender ke mutabiq verb forms use karein:
+
+| Scenario | Do |
+|---|---|
+| Male caller | "آپ کیا **چاہتے** ہیں؟", "آپ **بتا رہے** ہیں", "آپ **گئے** تھے؟" |
+| Female caller | "آپ کیا **چاہتی** ہیں؟", "آپ **بتا رہی** ہیں", "آپ **گئی** تھیں؟" |
+| Unknown gender | Default to masculine forms |
+
+The caller's gender will be specified in the context below. If specified, use it consistently.
 
 ## What PSBA does
 
@@ -334,6 +347,7 @@ class CallHandler:
         self.caller_context = ""
         self.caller_name    = ""
         self.caller_phone   = ""
+        self.caller_gender  = ""
         self.stop_event          = None
         self.offered_goodbye     = False
         self.asterisk_channel    = None
@@ -350,6 +364,21 @@ class CallHandler:
                 log.info(f"[{self.call_id}] Captured phone: {phone}")
         except Exception:
             pass
+
+    async def _detect_gender(self, text: str):
+        if self.caller_gender:
+            return
+        gender = detect_caller_gender(text)
+        if gender:
+            self.caller_gender = gender
+            log.info(f"[{self.call_id}] Detected caller gender: {gender}")
+            gender_note = (
+                f"\n\n## Caller gender\n"
+                f"Caller is {gender}. Address them using {'masculine' if gender == 'male' else 'feminine'} Urdu verb forms:\n"
+                f"- {'رہے ہیں, چاہتے ہیں, بتا رہے ہیں, گئے, آئے' if gender == 'male' else 'رہی ہیں, چاہتی ہیں, بتا رہی ہیں, گئیں, آئیں'}\n"
+                f"CRITICAL: Use these forms consistently throughout the conversation."
+            )
+            self.caller_context += gender_note
 
     async def play_audio(self, pcm: bytes):
         self.barge_in.clear()
@@ -446,6 +475,7 @@ class CallHandler:
                 self.conversation.pop()
 
         asyncio.create_task(self._capture_name_phone(text))
+        asyncio.create_task(self._detect_gender(text))
 
         if action == cfg.ext_supervisor:
             await self.speak(reply)
