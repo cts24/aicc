@@ -1,0 +1,17 @@
+[Unit]
+Description=PSBA AI Receptionist — Zara (Bilingual, ext 5000)
+After=network.target asterisk.service
+
+[Service]
+Type=simple
+User=asterisk
+WorkingDirectory=/opt/aiagent
+ExecStart=/opt/aiagent/venv/bin/python3 /opt/aiagent/zara.py
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=zara
+
+[Install]
+WantedBy=multi-user.target

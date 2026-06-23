@@ -1,0 +1,18 @@
+[Unit]
+Description=PSBA AI Voice Agent — Sara (English ext 9000)
+After=network.target asterisk.service
+
+[Service]
+Type=simple
+User=asterisk
+Group=asterisk
+WorkingDirectory=/opt/aiagent
+ExecStart=/opt/aiagent/venv/bin/python3 /opt/aiagent/voice_agent.py
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target
