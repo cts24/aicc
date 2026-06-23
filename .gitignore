@@ -20,3 +20,6 @@ Thumbs.db
 
 # Temp
 temp/
+
+# Claude CLI settings
+.claude/
