@@ -150,3 +150,47 @@ def urdu_phonetic(text: str) -> str:
         text = pattern.sub(replacement, text)
     text = re.sub(r'\b\d{3,}\b', lambda m: ' '.join(m.group(0)), text)
     return text
+
+
+# ── Urdu TTS text normalizer (for Uplift) ─────────────────────────────────
+_URDU_DIGITS = {"0": "صفر", "1": "ایک", "2": "دو", "3": "تین", "4": "چار",
+                "5": "پانچ", "6": "چھ", "7": "سات", "8": "آٹھ", "9": "نو"}
+
+_EMAIL_RE = re.compile(r'([a-zA-Z0-9._%+-]+)@([a-zA-Z0-9.-]+\.[a-zA-Z]{2,})')
+_PHONE_HYPHEN_RE = re.compile(r'\b(\d{3,4})-(\d{3,4})-?(\d{3,})?\b')
+_LONG_DIGITS_RE = re.compile(r'\b\d{10,}\b')
+_URL_RE = re.compile(r'https?://(?:www\.)?([a-zA-Z0-9.-]+)')
+
+
+def _digits_to_urdu(m: re.Match) -> str:
+    """Convert a digit sequence into Urdu digit names separated by spaces."""
+    return " ".join(_URDU_DIGITS.get(ch, ch) for ch in m.group(0))
+
+
+def normalize_tts_text(text: str) -> str:
+    """Pre-process LLM output for Uplift TTS.
+
+    Converts raw numbers, emails, and addresses into phonetic forms
+    that Uplift TTS can pronounce correctly.
+    """
+    # 1. URLs → strip protocol
+    text = _URL_RE.sub(r'\1', text)
+
+    # 2. Email addresses → phonetic
+    text = _EMAIL_RE.sub(r'\1 ایٹ \2', text)
+    # Convert dots in domain to ڈاٹ (after @ or preceded by letter)
+    text = re.sub(r'(?<=[a-zA-Z0-9])\.(?=[a-zA-Z]{2,})', ' ڈاٹ ', text)
+
+    # 3. Phone numbers with hyphens: 0307-0002345 → digit-by-digit with pause
+    def phone_replacer(m):
+        parts = [p for p in m.groups() if p]
+        return "۔ ".join(" ".join(_URDU_DIGITS.get(ch, ch) for ch in part) for part in parts)
+    text = _PHONE_HYPHEN_RE.sub(phone_replacer, text)
+
+    # 4. Long digit sequences (10+ digits) → digit-by-digit
+    text = _LONG_DIGITS_RE.sub(_digits_to_urdu, text)
+
+    # 5. Hyphen between digits → space (for split numbers)
+    text = re.sub(r'(\d)-(\d)', r'\1 \2', text)
+
+    return text

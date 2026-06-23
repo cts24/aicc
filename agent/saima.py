@@ -25,7 +25,7 @@ from agent_lib import (
     setup_log, normalize_phone,
     AS_HANGUP, AS_UUID, AS_AUDIO, AS_AUDIO_SLIN16, AS_ERROR, pack_frame, read_frame, downsample_16k_to_8k,
     is_farewell_response, strip_gap_words, urdu_phonetic,
-    detect_caller_gender,
+    detect_caller_gender, normalize_tts_text,
     AMIClient, get_caller_id,
     chatwoot_lookup, create_chatwoot_lead,
     send_ntfy_notification, send_gmail_notification, book_sales_appointment,
@@ -156,6 +156,24 @@ Aap Saima hain (feminine) — apne liye feminine verbs use karti hain. Lekin CAL
 
 The caller's gender will be specified in the context below. If specified, use it consistently.
 
+### Numbers and addresses — TTS-friendly format
+
+CRITICAL: Uplift TTS mispronounces raw numbers, emails, and addresses. You MUST write them in TTS-friendly format:
+
+| Type | Wrong (raw) | Right (TTS-friendly) |
+|---|---|---|
+| Phone | "0307-0002345" | "صفر تین صفر سات۔ صفر صفر صفر دو تین چار پانچ" |
+| Office | "042-99001000" | "صفر چار دو۔ نو نو صفر صفر ایک ہزار" |
+| Helpline | "03070002345" | "صفر تین صفر سات۔ صفر صفر صفر دو تین چار پانچ" |
+| Email | "info@psba.gop.pk" | "انفو ایٹ پی ایس بی اے ڈاٹ جی او پی ڈاٹ پی کے" |
+| Website | "psba.gop.pk" | "پی ایس بی اے ڈاٹ جی او پی ڈاٹ پی کے" |
+| Percentage | "35%" | "پینتیس فیصد" |
+| Price | "Rs 8,000" | "آٹھ ہزار روپے" |
+| Small number | "12 bazaars" | "بارہ bazaars" |
+| Large number | "60 million" | "ساٹھ ملین" |
+
+Always use Urdu digit names (صفر ایک دو تین...) for phone numbers, not raw digits.
+
 ## What PSBA does
 
 Sahulat Bazaars — daily-use items 35% below market (7% below DC rate). Prices change daily.
@@ -223,6 +241,22 @@ async def create_phrase_replacement_config(api_key: str) -> Optional[str]:
         {"phrase": "AI", "replacement": "اے آئی"},
         {"phrase": "Lahore", "replacement": "لاہور"},
         {"phrase": "Punjab", "replacement": "پنجاب"},
+        {"phrase": "app", "replacement": "ایپ"},
+        {"phrase": "Play Store", "replacement": "پلے سٹور"},
+        {"phrase": "App Store", "replacement": "ایپ سٹور"},
+        {"phrase": "home delivery", "replacement": "ہوم ڈیلیوری"},
+        {"phrase": "cash on delivery", "replacement": "کیش آن ڈیلیوری"},
+        {"phrase": "complaint", "replacement": "کمپلینٹ"},
+        {"phrase": "stall", "replacement": "سٹال"},
+        {"phrase": "balloting", "replacement": "بیلٹنگ"},
+        {"phrase": "supervisor", "replacement": "سپروائزر"},
+        {"phrase": "representative", "replacement": "ریپریزنٹیٹو"},
+        {"phrase": "callback", "replacement": "کال بیک"},
+        {"phrase": "online", "replacement": "آن لائن"},
+        {"phrase": "account", "replacement": "اکاؤنٹ"},
+        {"phrase": "delivery", "replacement": "ڈیلیوری"},
+        {"phrase": "discount", "replacement": "ڈسکاؤنٹ"},
+        {"phrase": "team", "replacement": "ٹیم"},
     ]
     try:
         async with httpx.AsyncClient(timeout=10) as client:
@@ -396,10 +430,11 @@ class CallHandler:
 
     async def speak(self, text: str):
         log.info(f"[{self.call_id}] SAIMA: {text}")
+        tts_text = normalize_tts_text(text)
         self.speaking = True
         try:
             silence = b'\x00' * 640
-            tts_task = asyncio.create_task(text_to_speech(text))
+            tts_task = asyncio.create_task(text_to_speech(tts_text))
             while not tts_task.done():
                 self.writer.write(pack_frame(AS_AUDIO_SLIN16, silence))
                 await self.writer.drain()
