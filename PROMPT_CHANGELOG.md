@@ -97,6 +97,35 @@
 
 ---
 
+## v5 — 2026-06-24: Markdown lockdown + domain guard + repeat prevention
+
+### Changes
+- **Prompt rewrite** — stripped bloat (8 patterns → concise sections), focused on core problems
+- **NO MARKDOWN rule** at very top — bold, italic, lists, tables, headings banned
+- **Domain guard** — explicit non-PSBA redirect: "معذرت، یہ PSBA helpline ہے"
+- **Location answers** — never list, always ask area first, conversationally name 2-3
+- **Repeat prevention** — 2nd repeat: "میں نے ابھی بتایا", 3rd repeat: helpline → end call
+- **Response length** — max 2-3 sentences absolute
+- **`normalize_tts_text()`** — added markdown stripping before number formatting
+- **Graceful exit** — caller clearly done → no extra question, natural farewell
+- Removed Pakistani/Indian comparison table to avoid table pattern leaking
+- Removed number formatting tables (prompt was learning to output tables)
+- Simplified: 255 lines of prompt → 78 lines (focused, enforced)
+
+### Result
+- LLM no longer outputs `**bold**` or `1. numbered lists` in speech
+- Off-topic questions redirected to PSBA domain
+- Location questions answered conversationally without list dumps
+- Same info not repeated when caller asks again
+- Call naturally ends after 3rd repeat of same question
+
+### Lesson
+- Tables and formatting examples in the prompt teach the LLM to output the same format
+- Fewer patterns with strict enforcement beats many patterns with loose guidance
+- Domain guard needs to be explicit with exact wording, not just a "no" rule
+
+---
+
 ## v0 — Original (before 2026-06-23)
 
 ### State

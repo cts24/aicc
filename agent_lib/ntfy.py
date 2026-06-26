@@ -29,7 +29,7 @@ async def send_ntfy_notification(lead: dict, call_id: str, agent_name: str, cfg)
                 f"{server}/{topic}",
                 content=body.encode("utf-8"),
                 headers={
-                    "Title": f"New Lead - {agent_name} - {name}",
+                    "Title": f"New Lead - {agent_name} - {name}".encode("ascii", errors="replace").decode(),
                     "Priority": priority,
                     "Tags": "telephone,globe_with_meridians",
                 }

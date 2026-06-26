@@ -10,7 +10,6 @@ PSBA AI Receptionist — Zara (Bilingual, ext 5000)
 import asyncio
 import json
 import logging
-import random
 import re
 import smtplib
 import struct
@@ -22,14 +21,13 @@ from pathlib import Path
 from typing import Optional
 
 import httpx
-import websockets
 
 from agent_lib import (
-    AgentConfig, load_env, load_zara_config,
-    setup_log,
-    AS_HANGUP, AS_UUID, AS_AUDIO, AS_AUDIO_SLIN16, AS_ERROR, pack_frame, read_frame, downsample_16k_to_8k,
-    AMIClient,
+    load_env, load_zara_config, setup_log,
 )
+from agent_lib.audiosocket import AS_AUDIO_SLIN16, pack_frame
+from agent_lib.engine import AgentEngine
+from agent_lib.config import AgentConfig
 
 load_env()
 cfg: AgentConfig = load_zara_config()
@@ -71,21 +69,6 @@ SUPERVISOR_ANNOUNCE_TEXT = (
     "Hello! This is Zara, the AI receptionist at PSBA — Punjab Sahulaat Bazaars Authority. "
     "You have an inbound caller requesting to speak with a supervisor. "
     "Please press 1 now to accept the call, or simply hang up to decline."
-)
-
-# ── Deepgram STT — Nova-3 multilingual ───────────────────────────────────────
-DEEPGRAM_STT_URL = (
-    "wss://api.deepgram.com/v1/listen"
-    "?encoding=linear16"
-    "&sample_rate=8000"
-    "&channels=1"
-    "&model=nova-3"
-    "&language=multi"
-    "&punctuate=true"
-    "&endpointing=300"
-    "&utterance_end_ms=1000"
-    "&interim_results=true"
-    "&vad_events=true"
 )
 
 # ── Deepgram TTS (English) ────────────────────────────────────────────────────
@@ -192,11 +175,6 @@ async def tts_english(text: str) -> bytes:
                 raise
             await asyncio.sleep(0.5)
 
-async def text_to_speech(text: str, lang: str = "en") -> bytes:
-    if lang == "ur":
-        return await tts_urdu(text)
-    return await tts_english(text)
-
 # ── Supervisor whisper announcement — generated once at startup ───────────────
 async def generate_supervisor_announcement() -> None:
     try:
@@ -211,86 +189,11 @@ async def generate_supervisor_announcement() -> None:
     except Exception as e:
         log.warning(f"Could not generate supervisor announcement: {e}")
 
-# ── LLM — English system prompt ───────────────────────────────────────────────
-SYSTEM_PROMPT_EN = """You are Zara, the professional AI receptionist at PSBA — Punjab Sahulaat Bazaars Authority, a Government of Punjab statutory body. PSBA operates regulated Sahulat Bazaars across Punjab providing essential commodities at government-notified prices. You are warm, confident, and human — not robotic.
-
-━━━ CONVERSATION FLOW ━━━
-Turn 1 — Greeting already played. Ask how you can help: "How can I help you today?"
-Turn 2 — Understand their reason fully. Do NOT route yet if unclear.
-Turn 3 — Route OR answer once you understand their reason.
-NEVER route without knowing the reason.
-
-━━━ ROUTING RULES ━━━
-Bazaar location / products / prices / shopping / app / delivery / stall inquiry / vendor registration / registration / sales / sales team / sales agent / customer service / speak to sales / talk to sales:
-→ Route to English: "Great! Let me connect you with our sales team. [TRANSFER:SARA]"
-→ Route to Urdu: "بہت اچھا! آپ کو ہماری سیلز ٹیم سے connect کرتی ہوں۔ [TRANSFER:SAIMA]"
-
-Account / billing / payment / invoice / receipt / financial:
-→ "Let me connect you with our accounts department. [TRANSFER:ACCOUNTS]"
-
-Complaint / support / refund / issue / problem / defective / not working:
-→ "I'll transfer you to our support team. [TRANSFER:SUPPORT]"
-
-Supervisor / manager / human agent / human representative / complaint escalation / urgent / emergency:
-→ "Let me connect you with a senior representative. [TRANSFER:SUPERVISOR]"
-
-━━━ KEY HANDLING ━━━
-- For simple questions that you CAN answer without routing: answer directly. Do NOT route every call.
-- If caller is angry or irate: stay calm, acknowledge their frustration, then route to SUPPORT or SUPERVISOR.
-- For location/product/app queries: route to sales (TRANSFER:SARA or TRANSFER:SAIMA).
-- "Speak to owner" / OWNER_EXT requests: "Let me connect you with the owner. [TRANSFER:SUPERVISOR]"
-- Never route without a clear reason. If unsure, ask: "Could you tell me a bit more about what you're looking for today?"
-- Keep responses short — max 2 sentences before the transfer tag.
-
-━━━ FAREWELL ━━━
-If the caller just wants basic info and you can answer it without routing: "Thank you for calling PSBA! Goodbye."
-For anything requiring action: route.
-
-━━━ LANGUAGE SWITCH ━━━
-If the caller switches to Urdu during conversation, respond in Urdu naturally.
-The greeting language determines the default — but follow the caller's lead.
-
-━━━ TAG FORMAT (CRITICAL) ━━━
-Always place transfer tags at the END of your response:
-WRONG: "[TRANSFER:SARA] Let me connect you."
-CORRECT: "Let me connect you. [TRANSFER:SARA]"
-"""
-
-SYSTEM_PROMPT_UR = """آپ زارہ ہیں — پنجاب سہولت بازار اتھارٹی (PSBA) کی پیشہ ور AI ریسپشنسٹ۔ آپ گرم جوش، پراعتماد اور قدرتی انداز میں بات کرتی ہیں۔
-
-━━━ بات چیت کا بہاؤ ━━━
-Turn 1 — Greeting already played. Welcome and ask: "آپ کی کیا مدد کر سکتی ہوں؟"
-Turn 2 — وجہ پوری طرح سمجھیں۔ جب تک واضح نہ ہو، route نہ کریں۔
-Turn 3 — Route کریں یا جواب دیں۔
-
-━━━ ROUTING RULES ━━━
-Sahulat Bazaar / location / product / price / shopping / app / delivery / stall / registration / sale:
-→ "بہت اچھا! آپ کو ہماری سیلز ٹیم سے connect کرتی ہوں۔ [TRANSFER:SAIMA]"
-(English caller: "Let me connect you with our sales team. [TRANSFER:SARA]")
-
-Account / billing / payment / invoice:
-→ "آپ کو accounts department سے connect کرتی ہوں۔ [TRANSFER:ACCOUNTS]"
-
-Complaint / support / refund / issue / problem / defective:
-→ "آپ کو support ٹیم سے connect کرتی ہوں۔ [TRANSFER:SUPPORT]"
-
-Supervisor / manager / human / complaint escalation / fraud / legal / urgent:
-→ "آپ کو senior representative سے connect کرتی ہوں۔ [TRANSFER:SUPERVISOR]"
-
-━━━ KEY HANDLING ━━━
-- Simple questions you can answer: answer directly. Don't route everything.
-- Angry caller: stay calm, acknowledge, route to SUPPORT or SUPERVISOR.
-- Speak to owner: route to SUPERVISOR.
-- Never route without a clear reason.
-- Keep responses short — max 2 sentences before transfer tag.
-
-━━━ LANGUAGE ━━━
-Standard Pakistani Urdu. Warm, professional, feminine verb forms (بتا رہی ہوں, کر سکتی ہوں).
-Never mix English and Urdu romanized in the same sentence.
-
-━━━ TAG FORMAT ━━━
-Always place transfer tags at the END: [TRANSFER:SAIMA]
-"""
+# ── Load system prompts from files ───────────────────────────────────────────
+_ZARA_PROMPT_EN_PATH = Path(__file__).parent / "zara_prompt_en.txt"
+_ZARA_PROMPT_UR_PATH = Path(__file__).parent / "zara_prompt_ur.txt"
+SYSTEM_PROMPT_EN = _ZARA_PROMPT_EN_PATH.read_text(encoding="utf-8") if _ZARA_PROMPT_EN_PATH.exists() else ""
+SYSTEM_PROMPT_UR = _ZARA_PROMPT_UR_PATH.read_text(encoding="utf-8") if _ZARA_PROMPT_UR_PATH.exists() else ""
 
 # ── ntfy Supervisor Alert ─────────────────────────────────────────────────────
 async def notify_supervisor(caller_info: dict) -> None:
@@ -404,6 +307,8 @@ async def stream_hold_music(writer, stop_event: asyncio.Event):
     if _MOH_FILE is None:
         _MOH_FILE = _find_moh_file() or ""
     proc = None
+    chunk = 640
+    chunk_duration = 320 / 16000
     try:
         if _MOH_FILE:
             cmd = [
@@ -423,8 +328,6 @@ async def stream_hold_music(writer, stop_event: asyncio.Event):
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
         )
-        chunk = 640
-        chunk_duration = 320 / 16000
         next_tick = time.monotonic()
         while not stop_event.is_set():
             data = await proc.stdout.read(chunk)
@@ -444,7 +347,7 @@ async def stream_hold_music(writer, stop_event: asyncio.Event):
         next_tick = time.monotonic()
         while not stop_event.is_set():
             try:
-                writer.write(pack_frame(AS_AUDIO_SLIN16, b'\x00' * 640))
+                writer.write(pack_frame(AS_AUDIO_SLIN16, b'\x00' * chunk))
                 await writer.drain()
                 next_tick += chunk_duration
                 sleep_for = next_tick - time.monotonic()
@@ -460,6 +363,8 @@ async def stream_hold_music(writer, stop_event: asyncio.Event):
                 proc.terminate()
             except Exception:
                 pass
+
+
 
 # ── Farewell detection ────────────────────────────────────────────────────────
 def is_farewell_response(text: str) -> bool:
@@ -482,60 +387,50 @@ def _callback_window():
         return "before close of business today", "آج کاروباری اوقات ختم ہونے سے پہلے"
     return "first thing tomorrow morning at 9 AM", "کل صبح 9 بجے"
 
-# ── Call Handler ──────────────────────────────────────────────────────────────
-_ami = AMIClient(cfg)
 
-class ZaraCallHandler:
-    def __init__(self, reader, writer):
-        self.reader          = reader
-        self.writer          = writer
-        self.call_id         = "unknown"
-        self.lang            = "en"
-        self.thinking        = False
-        self.speaking        = False
-        self.barge_in        = asyncio.Event()
-        self.conversation    = []
-        self.farewell_said   = False
-        self.stop_event      = None
-        self.transfer_in_progress = False
+class ZaraEngine(AgentEngine):
+    AGENT_NAME = "Zara"
+    SYSTEM_PROMPT = SYSTEM_PROMPT_EN
+    DEEPGRAM_STT_LANGUAGE = "multi"
+    DEEPGRAM_STT_MODEL = "nova-3"
+    BARGE_IN_WORD_COUNT = 3
+    FILLER_PHRASES = []
+    RETURN_ON_BARGE_IN = False
+    HOLD_MUSIC_PATH = ""
+
+    def __init__(self, cfg: AgentConfig, reader, writer):
+        super().__init__(cfg, reader, writer)
+        self.lang = "en"
+        self.farewell_said = False
         self.supervisor_attempted = False
-        self.asterisk_channel  = None
-        self.callback_info     = {"name": "", "phone": "", "reason": "", "notes": ""}
+        self.callback_info: dict = {"name": "", "phone": "", "reason": "", "notes": ""}
 
-    def _system_prompt(self) -> str:
-        return SYSTEM_PROMPT_UR if self.lang == "ur" else SYSTEM_PROMPT_EN
+    # ── TTS: bilingual ────────────────────────────────────────────────────
 
-    async def play_audio(self, pcm: bytes):
-        self.barge_in.clear()
-        chunk = 640
-        chunk_duration = 320 / 16000
-        next_tick = time.monotonic()
-        i = 0
-        while i < len(pcm):
-            if self.barge_in.is_set():
-                break
-            frame = pcm[i:i + chunk].ljust(chunk, b'\x00')
-            self.writer.write(pack_frame(AS_AUDIO_SLIN16, frame))
-            await self.writer.drain()
-            i += chunk
-            next_tick += chunk_duration
-            sleep_for = next_tick - time.monotonic()
-            if sleep_for > 0:
-                await asyncio.sleep(sleep_for)
+    async def text_to_speech(self, text: str) -> bytes:
+        if self.lang == "ur":
+            return await tts_urdu(text)
+        return await tts_english(text)
+
+    @classmethod
+    async def _static_text_to_speech(cls, text: str) -> bytes:
+        return await tts_english(text)
+
+    # ── Speak with language support ───────────────────────────────────────
 
     async def speak(self, text: str, lang: str = ""):
         use_lang = lang or self.lang
         log.info(f"[{self.call_id}] ZARA ({use_lang}): {text}")
         self.speaking = True
         try:
-            silence = b'\x00' * 640
-            chunk_duration = 320 / 16000
             next_tick = time.monotonic()
-            tts_task = asyncio.create_task(text_to_speech(text, use_lang))
+            if use_lang == "ur":
+                tts_task = asyncio.create_task(tts_urdu(text))
+            else:
+                tts_task = asyncio.create_task(tts_english(text))
             while not tts_task.done():
-                self.writer.write(pack_frame(AS_AUDIO_SLIN16, silence))
-                await self.writer.drain()
-                next_tick += chunk_duration
+                await self._send_silence()
+                next_tick += 0.02
                 sleep_for = next_tick - time.monotonic()
                 if sleep_for > 0:
                     await asyncio.sleep(sleep_for)
@@ -545,6 +440,35 @@ class ZaraCallHandler:
             log.error(f"[{self.call_id}] TTS error: {e}")
         finally:
             self.speaking = False
+
+    # ── Override points ───────────────────────────────────────────────────
+
+    def get_greeting(self) -> str:
+        if self.lang == "ur":
+            return "السلام علیکم! میں زارہ ہوں PSBA ریسپشنسٹ۔ آپ کی کیا مدد کر سکتی ہوں؟"
+        return "Hello! This is Zara, the AI receptionist at PSBA. How can I help you today?"
+
+    def get_farewell_extra(self) -> str:
+        if self.lang == "ur":
+            return "کیا میں آپ کی اور کوئی مدد کر سکتی ہوں؟"
+        return "Is there anything else I can help you with today?"
+
+    async def post_call_actions(self, conversation: list, call_id: str, caller_phone: str = "", complaint_id: Optional[int] = None) -> None:
+        pass
+
+    async def _on_call_setup(self):
+        pass
+
+    async def on_before_llm(self, text: str) -> list:
+        return []
+
+    async def on_after_llm(self, text: str, reply: str, action: Optional[str] = None) -> str:
+        return reply
+
+    # ── LLM (own client, not using agent_lib.llm) ────────────────────────
+
+    def _system_prompt(self) -> str:
+        return SYSTEM_PROMPT_UR if self.lang == "ur" else SYSTEM_PROMPT_EN
 
     async def llm_respond(self, conversation: list) -> str:
         system = self._system_prompt()
@@ -570,6 +494,8 @@ class ZaraCallHandler:
                 log.warning(f"LLM attempt {attempt + 1} failed: {e}")
                 await asyncio.sleep(wait)
 
+    # ── Handle transcript (full override — language detection + routing) ─
+
     async def handle_transcript(self, text: str):
         if not text.strip() or self.thinking or self.transfer_in_progress:
             return
@@ -579,7 +505,7 @@ class ZaraCallHandler:
         self.thinking = True
         log.info(f"[{self.call_id}] USER ({self.lang}): {text}")
 
-        # First meaningful input — detect language if not yet confirmed
+        # Language detection on first utterance
         if not self.conversation:
             detected = detect_language(text)
             if detected == "ur" and self.lang == "en":
@@ -599,10 +525,9 @@ class ZaraCallHandler:
         llm_task = asyncio.create_task(self.llm_respond(self.conversation))
         reply = "Sorry, I didn't catch that. Could you repeat?"
         try:
-            reply = await llm_task
-            if not reply:
-                reply = "Sorry, could you repeat that?"
-            else:
+            result = await llm_task
+            if result:
+                reply = result
                 self.conversation.append({"role": "assistant", "content": reply})
         except Exception as e:
             log.error(f"[{self.call_id}] LLM error: {e}")
@@ -614,7 +539,7 @@ class ZaraCallHandler:
             if self.transfer_in_progress:
                 return
             self.transfer_in_progress = True
-            log.info(f"[{self.call_id}] Transfer requested: {action} for ext {action}")
+            log.info(f"[{self.call_id}] Transfer requested: ext {action}")
             await self.speak(spoken)
             await self.do_attended_transfer(action)
             self.transfer_in_progress = False
@@ -629,23 +554,20 @@ class ZaraCallHandler:
             else:
                 self.farewell_said = True
                 cb_en, cb_ur = _callback_window()
-                if self.lang == "ur":
-                    await self.speak("کیا میں آپ کی اور کوئی مدد کر سکتی ہوں؟", "ur")
-                else:
-                    await self.speak("Is there anything else I can help you with today?", "en")
+                extra = self.get_farewell_extra()
+                await self.speak(extra)
+
+    # ── Attended transfer (for supervisor) ───────────────────────────────
 
     async def do_attended_transfer(self, exten: str):
-        """Attended transfer: hold → Originate supervisor → bridge on answer."""
         await asyncio.sleep(0.5)
         hold_stop = asyncio.Event()
         hold_task = asyncio.create_task(stream_hold_music(self.writer, hold_stop))
 
         if not self.asterisk_channel:
-            self.asterisk_channel = await _ami.get_agent_channel()
+            self.asterisk_channel = await self.ami.get_agent_channel()
             if self.asterisk_channel:
                 log.info(f"[{self.call_id}] Late channel scan: {self.asterisk_channel}")
-            else:
-                log.warning(f"[{self.call_id}] No Asterisk channel found")
 
         if not self.asterisk_channel:
             hold_stop.set()
@@ -660,7 +582,7 @@ class ZaraCallHandler:
             await self._handle_callback()
             return
 
-        action_id = await _ami.originate_supervisor_check(self.asterisk_channel, exten)
+        action_id = await self.ami.originate_supervisor_check(self.asterisk_channel, exten)
         if not action_id:
             hold_stop.set()
             await hold_task
@@ -669,7 +591,7 @@ class ZaraCallHandler:
             return
 
         log.info(f"[{self.call_id}] Waiting for supervisor to answer (timeout 25s)...")
-        supervisor_done = await _ami.wait_for_originate_response(action_id, timeout=25.0)
+        supervisor_done = await self.ami.wait_for_originate_response(action_id, timeout=25.0)
 
         hold_stop.set()
         await hold_task
@@ -706,7 +628,6 @@ class ZaraCallHandler:
             self.stop_event.set()
 
     async def capture_callback_info(self, text: str):
-        """Extract name and phone from caller response during callback flow."""
         import json
         prompt = (
             "Extract name and Pakistani phone number from this text. "
@@ -729,158 +650,17 @@ class ZaraCallHandler:
         except Exception:
             pass
 
-    async def run(self):
-        try:
-            kind, payload = await asyncio.wait_for(read_frame(self.reader), timeout=5)
-            if kind == AS_UUID:
-                self.call_id = payload.decode("utf-8", errors="ignore").strip()
-        except Exception as e:
-            log.warning(f"UUID read error: {e}")
-
-        log.info(f"[{self.call_id}] Call started")
-
-        await asyncio.sleep(0.3)
-        try:
-            self.asterisk_channel = await asyncio.wait_for(_ami.get_agent_channel(), timeout=4)
-            if self.asterisk_channel:
-                log.info(f"[{self.call_id}] Asterisk channel: {self.asterisk_channel}")
-        except asyncio.TimeoutError:
-            log.warning(f"[{self.call_id}] AMI channel lookup timed out")
-
-        dg_headers      = {"Authorization": f"Token {DEEPGRAM_API_KEY}"}
-        transcript_parts = []
-        audio_queue     = asyncio.Queue()
-        stop_event      = asyncio.Event()
-        self.stop_event = stop_event
-
-        async def dg_receiver(ws):
-            async for msg in ws:
-                try:
-                    data = json.loads(msg)
-                    msg_type = data.get("type", "")
-                    if msg_type == "Results":
-                        alt  = data["channel"]["alternatives"][0]
-                        text = alt.get("transcript", "")
-                        if text and self.speaking and not self.barge_in.is_set() and len(text.split()) >= 3:
-                            log.info(f"[{self.call_id}] Barge-in: '{text}'")
-                            self.barge_in.set()
-                        if text and data.get("is_final"):
-                            transcript_parts.append(text)
-                    elif msg_type == "UtteranceEnd":
-                        full = " ".join(transcript_parts).strip()
-                        transcript_parts.clear()
-                        if full:
-                            asyncio.create_task(self.handle_transcript(full))
-                except Exception as e:
-                    log.debug(f"DG parse: {e}")
-
-        async def dg_sender(ws):
-            while not stop_event.is_set():
-                try:
-                    chunk = await asyncio.wait_for(audio_queue.get(), timeout=0.5)
-                    if chunk is None:
-                        break
-                    await ws.send(chunk)
-                except asyncio.TimeoutError:
-                    try:
-                        await ws.send(b'\x00' * 320)
-                    except Exception:
-                        break
-                except Exception as e:
-                    log.warning(f"DG send: {e}")
-                    break
-
-        async def asterisk_reader():
-            while not stop_event.is_set():
-                try:
-                    kind, data = await asyncio.wait_for(
-                        read_frame(self.reader), timeout=60
-                    )
-                    if kind in (AS_HANGUP, AS_ERROR):
-                        log.info(f"[{self.call_id}] Hangup/error")
-                        stop_event.set()
-                        break
-                    if kind in (AS_AUDIO, AS_AUDIO_SLIN16) and data:
-                        await audio_queue.put(
-                            downsample_16k_to_8k(data) if kind == AS_AUDIO_SLIN16 else data
-                        )
-                except asyncio.TimeoutError:
-                    log.info(f"[{self.call_id}] Read timeout — ending call")
-                    stop_event.set()
-                    break
-                except asyncio.IncompleteReadError:
-                    log.info(f"[{self.call_id}] Caller disconnected")
-                    stop_event.set()
-                    break
-                except Exception as e:
-                    log.error(f"[{self.call_id}] Read error: {e}")
-                    stop_event.set()
-                    break
-
-        async def greeting_task():
-            await asyncio.sleep(0.3)
-            self.thinking = True
-            silence = b'\x00' * 640
-            en = "Hello! This is Zara, the AI receptionist at PSBA. How can I help you today?"
-            ur = "السلام علیکم! میں زارہ ہوں PSBA ریسپشنسٹ۔ آپ کی کیا مدد کر سکتی ہوں؟"
-            greeting = ur if self.lang == "ur" else en
-            tts_task = asyncio.create_task(text_to_speech(greeting, self.lang))
-            next_tick = time.monotonic()
-            chunk_duration = 320 / 16000
-            while not tts_task.done():
-                self.writer.write(pack_frame(AS_AUDIO_SLIN16, silence))
-                await self.writer.drain()
-                next_tick += chunk_duration
-                sleep_for = next_tick - time.monotonic()
-                if sleep_for > 0:
-                    await asyncio.sleep(sleep_for)
-            self.thinking = False
-            try:
-                pcm = await tts_task
-                self.speaking = True
-                await self.play_audio(pcm)
-                self.speaking = False
-                self.conversation.append({"role": "assistant", "content": greeting})
-            except Exception as e:
-                log.error(f"[{self.call_id}] Greeting error: {e}")
-                self.speaking = False
-
-        try:
-            async with websockets.connect(
-                DEEPGRAM_STT_URL,
-                additional_headers=dg_headers,
-                ping_interval=20,
-            ) as dg_ws:
-                log.info(f"[{self.call_id}] Deepgram Nova-3 multi connected")
-
-                await asyncio.gather(
-                    asterisk_reader(),
-                    dg_receiver(dg_ws),
-                    dg_sender(dg_ws),
-                    greeting_task(),
-                )
-
-                try:
-                    await dg_ws.send(json.dumps({"type": "CloseStream"}))
-                except Exception:
-                    pass
-
-        except Exception as e:
-            log.error(f"[{self.call_id}] WebSocket error: {e}")
-        finally:
-            stop_event.set()
-            self.writer.close()
-            log.info(f"[{self.call_id}] Call ended")
 
 # ── Server entry point ────────────────────────────────────────────────────────
 async def handle_connection(reader, writer):
     addr = writer.get_extra_info("peername")
     log.info(f"Connection from {addr}")
-    handler = ZaraCallHandler(reader, writer)
+    handler = ZaraEngine(cfg, reader, writer)
     await handler.run()
 
 async def main():
-    await _ami.connect()
+    ZaraEngine.setup_services(cfg)
+    await ZaraEngine.ami.connect()
     await generate_supervisor_announcement()
     log.info("=" * 60)
     log.info(f"PSBA — Zara (Bilingual, ext 5000)")

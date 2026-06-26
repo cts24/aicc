@@ -1,44 +1,56 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance when working with this repository.
 
 ---
 
-## Project: PSBA AI Voice Call Center
+## Project: AI Voice Call Center
 
-**Client:** Punjab Sahulat Bazaar Authority (PSBA), Government of Punjab
-Three AI voice agents on Asterisk. Caller dials → Asterisk AudioSocket bridges raw PCM → STT → LLM → TTS → audio back to caller.
+**Stack:** Asterisk/FreePBX (telephony) · Custom Python agents via AudioSocket · Deepgram STT · OpenAI GPT-4o-mini (conversation LLM) · Groq Llama-4 (extraction) · Deepgram Aura / Uplift / ElevenLabs (TTS) · Odoo 19 CE (CRM/Helpdesk) · Chatwoot (omnichannel inbox) · n8n (workflows) · Cal.com (scheduling) · Metabase + Grafana (analytics)
+
+**Deployment model:** Single-tenant. Each client gets their own instance.
+
+**Current client:** Punjab Sahulat Bazaar Authority (PSBA), Government of Punjab — serves as the reference implementation.
 
 ---
 
-## Infrastructure
+## Infrastructure — Current (EC2)
 
 | Field | Value |
 |---|---|
-| EC2 IP | `44.194.44.98` |
-| EC2 OS | Amazon Linux 2023 |
+| Server | m7i-flex.large (2 vCPU, 8GB RAM) |
+| Public IP | `44.194.44.98` |
+| OS | Amazon Linux 2023 |
 | SSH User | `ec2-user` |
 | SSH Key | `D:\Cloudops24\AICC\AICCkey.pem` |
 | Asterisk | v20.18.2 compiled from source, PJSIP |
 | Agent path | `/opt/aiagent/` |
-| Python venv | `/opt/aiagent/venv/bin/python3` |
+| Python | `/opt/aiagent/venv/bin/python3` |
 | Service user | `asterisk` |
 | ffmpeg | `/usr/local/bin/ffmpeg` (static binary) |
 | .env | `/opt/aiagent/.env` — `chmod 600`, owned by `asterisk` |
-| nginx | Host-installed (not Docker), reverse proxy for HTTPS |
-| SSL cert | **EXPIRED** 2026-06-20 — needs `sudo certbot renew` |
-| Dashboard | `dashboard.py` on port 8080 (asterisk user) |
+| nginx | Host-installed, reverse proxy for HTTPS |
+| SSL | Valid until 2026-09-21 (86 days) |
+| Dashboard | `dashboard.py` on port 8080 |
+
+### Target Production — Hostinger KVM
+
+| Field | Value |
+|---|---|
+| Plan | Hostinger KVM 4GB |
+| Cost | **$5.19/mo** |
+| Includes | 4GB RAM, 2 vCPU, storage, no EBS nonsense |
 
 ---
 
-## Agents
+## Agents (PSBA Reference)
 
-| Ext | Agent | File | Port | UUID |
+| Ext | Agent | File | Port | Language |
 |---|---|---|---|---|
-| 5000 | Zara — Bilingual Receptionist | `zara.py` (876 lines) | 9096 | `...000003` |
-| 9000 | Sara — English Customer Service | `voice_agent.py` (634 lines) | 9092 | `...000001` |
-| 8000 | Saima — Urdu Customer Service | `saima.py` (603 lines) | 9094 | `...000002` |
-| 1000 | Owner (Zoiper/MicroSIP) | — | — | — |
+| 5000 | Zara — Bilingual Receptionist | `zara.py` (~757 lines) | 9096 | EN + UR |
+| 9000 | Sara — English Customer Service | `voice_agent.py` (~347 lines) | 9092 | EN |
+| 8000 | Saima — Urdu Customer Service | `saima.py` (~508 lines) | 9094 | UR |
+| 1000 | Owner SIP | — | — | — |
 | 1010-1003 | Additional SIP users | PJSIP | — | — |
 | 2000 | Accounts dept | PJSIP | — | — |
 | 3000 | Supervisor | PJSIP | — | — |
@@ -47,476 +59,327 @@ Three AI voice agents on Asterisk. Caller dials → Asterisk AudioSocket bridges
 | Agent | STT | TTS | LLM (conversation) | LLM (extraction) |
 |---|---|---|---|---|
 | Zara | Deepgram Nova-3 `multi` | Deepgram Aura (EN) + ElevenLabs Sana (UR) | OpenAI `gpt-4o-mini` | OpenAI `gpt-4o-mini` |
-| Sara | Deepgram Nova-2 `en-US` | Deepgram Aura `aura-asteria-en` | OpenAI `gpt-4o-mini` | **Groq `llama-4-scout-17b`** (free) |
-| Saima | Deepgram Nova-3 `ur` | **Uplift TTS helpdesk-agent** + ffmpeg soxr 16kHz | OpenAI `gpt-4o-mini` | **Groq `llama-4-scout-17b`** (free) |
+| Sara | Deepgram Nova-2 `en-US` | Deepgram Aura `aura-asteria-en` | OpenAI `gpt-4o-mini` | Groq `llama-4-scout-17b` |
+| Saima | Deepgram Nova-3 `ur` | Uplift TTS helpdesk-agent | OpenAI `gpt-4o-mini` | Groq `llama-4-scout-17b` |
 
-**Config is NOT hardcoded anymore** — all agents use `agent_lib/config.py` which loads from `.env`.
-See `.env.example` for all available variables.
+**Config** — all agents use `agent_lib/config.py` which loads from `.env`. See `.env.example`.
 
 ---
 
-## agent_lib — Shared Library (13 modules)
+## agent_lib — Shared Library
 
-| Module | Lines | Purpose |
+| Module | Purpose |
+|---|---|
+| `engine.py` | `AgentEngine` base class — shared audio pipeline, Deepgram lifecycle, AMI, transfers, hooks |
+| `config.py` | `AgentConfig` dataclass + `load_env()` + per-agent config builders |
+| `audiosocket.py` | Protocol constants + `pack_frame`/`read_frame`/`downsample_16k_to_8k` |
+| `ami.py` | `AMIClient` — connect, Status, GetVar, Redirect, Originate |
+| `llm.py` | `llm_respond()`, `extract_name_phone()`, `extract_lead_data()`, `parse_transfer_tag()` |
+| `odoo.py` | `OdooClient` — async XMLRPC wrapper, `create_lead()`, `create_helpdesk_ticket()`, `search_partner()`, `search_tickets_by_phone()` |
+| `chatwoot.py` | `chatwoot_lookup()`, `create_chatwoot_lead()` |
+| `ntfy.py` | `send_ntfy_notification()` |
+| `gmail.py` | `send_gmail_notification()` |
+| `calendar.py` | `book_sales_appointment()` — wired, needs Cal.com API |
+| `speech.py` | `normalize_tts_text()`, `is_farewell_response()`, `urdu_phonetic()` |
+| `phone.py` | `normalize_phone()` — E.164 conversion |
+| `log.py` | `setup_log()` — JSON-structured logging |
+| `__init__.py` | Re-exports all public API |
+
+---
+
+## Audio Pipeline
+
+```
+Caller dials ext → Answer() → AudioSocket(UUID, 127.0.0.1:PORT)
+
+asterisk_reader()    → reads 16kHz SLIN16 frames → audio_queue
+dg_sender()          → downsamples to 8kHz → Deepgram WebSocket
+dg_receiver()        → Results (is_final) → transcript_parts
+                      UtteranceEnd → handle_transcript()
+handle_transcript()  → LLM → TTS → play_audio()
+play_audio()         → 640B chunks, sleep(0.018), AS_AUDIO_SLIN16 (0x12)
+```
+
+**Frames:** `[type:1B][length:2B BE][data]` — `0x00`=HANGUP, `0x01`=UUID, `0x10`=8kHz AUDIO, `0x12`=16kHz SLIN16, `0xff`=ERROR
+
+**Timing:** 640 bytes = 20ms audio. `sleep(0.018)` builds 2ms buffer per chunk to absorb event loop jitter.
+
+---
+
+## Docker Services — Running on EC2
+
+| Service | Internal URL | Public HTTPS | Container |
+|---|---|---|---|
+| Chatwoot | `http://44.194.44.98:3000` | `https://44-194-44-98.sslip.io` | chatwoot/chatwoot:latest |
+| ntfy | `http://44.194.44.98:8090` | `https://ntfy.44-194-44-98.sslip.io` | binwiederhier/ntfy |
+| Odoo 19 | `http://localhost:8069` | `https://odoo.44-194-44-98.sslip.io` | odoo:19.0 |
+| n8n | ❌ Not deployed | — | — |
+| Cal.com | ❌ Not deployed | — | — |
+| Metabase | ❌ Not deployed | — | — |
+| Grafana | ❌ Not deployed | — | — |
+
+### Chatwoot
+- Login: `nextvisionorganization@gmail.com`
+- API Token: `ADvi1PAFuxSxZbzZmF1SaPPf`
+- Account ID: 1, Inbox ID: 1
+- Contact creation: `response.payload.contact.id`
+- Conversation creation: `response.id` (top level)
+- Install: `/opt/chatwoot/`
+
+### Odoo
+- Login: `admin` / `admin`
+- DB: `odoo` / `odoo2025`
+- Install: `/opt/odoo/`
+- Odoo Server 19.0-20260619
+- `_xml_safe_str()` already implemented in `odoo.py` for XML char sanitization
+
+### ntfy
+- Topics: `psba_leads` (call leads) · `psba_supervisor` (supervisor unavailable)
+- Server: `http://44.194.44.98:8090` / `https://ntfy.44-194-44-98.sslip.io`
+
+---
+
+## nginx HTTPS
+
+| Domain | Proxies To | SSL Status |
 |---|---|---|
-| `audiosocket.py` | 28 | Protocol constants + `pack_frame`/`read_frame`/`downsample_16k_to_8k` |
-| `phone.py` | 8 | `normalize_phone()` — E.164 conversion |
-| `speech.py` | 100 | `is_farewell_response()`, `strip_gap_words()`, `urdu_phonetic()` |
-| `config.py` | 191 | `AgentConfig` dataclass + `load_env()` + per-agent config builders |
-| `log.py` | 12 | `setup_log()` — JSON-structured logging |
-| `ami.py` | 262 | `AMIClient` — connect, Status, GetVar, Redirect, Originate |
-| `chatwoot.py` | 114 | `chatwoot_lookup()`, `create_chatwoot_lead()` |
-| `ntfy.py` | 34 | `send_ntfy_notification()` |
-| `gmail.py` | 42 | `send_gmail_notification()` |
-| `calendar.py` | 27 | `book_sales_appointment()` — wired, needs JSON key |
-| `odoo.py` | 132 | `OdooClient` — async XMLRPC wrapper, `search_partner()`, `create_lead()` |
-| `llm.py` | 127 | `llm_respond()`, `extract_name_phone()`, `extract_lead_data()`, `parse_transfer_tag()` |
-| `__init__.py` | 14 | Re-exports all public API |
-
----
-
-## Audio Pipeline — 16kHz SLIN16
-
-```
-Caller dials ext
-      │  Answer() → Wait(1) → Set(GLOBAL(CALLERID)) → AudioSocket(UUID, 127.0.0.1:PORT)
-      │
- asterisk_reader()   ← reads AudioSocket frames (HANGUP/UUID/AUDIO SLIN16)
-      │                 drops audio when thinking=True OR transfer_in_progress=True
-      │
- audio_queue         ← asyncio.Queue
-      │
- dg_sender()         ← downsamples 16kHz→8kHz via decimation → Deepgram WebSocket
-      │                 sends KeepAlive every 0.5s when idle
-      │
- dg_receiver()       ← Results (is_final) → transcript_parts
-      │                 UtteranceEnd → fires handle_transcript()
-      │                 barge-in: text while speaking → barge_in.set()
-      │
- handle_transcript() ← thinking=True → silence filler → llm_respond() → parse_transfer_tag()
-      │                 if [TRANSFER:SUPERVISOR] → speak() → do_blind_transfer()
-      │                 else → speak() → farewell check → offered_goodbye pattern
-      │                 _capture_name_phone() runs as background task each turn
-      │
-  speak()             ← TTS while sending silence frames (640 bytes @ sleep 0.018)
-      │                 Saima: Uplift TTS (WAV_22050_16) → ffmpeg soxr → PCM 16kHz
-      │                 Sara:  Deepgram Aura (MP3) → ffmpeg soxr → PCM 16kHz
-      │                 Zara:  Dg Aura (EN) or ElevenLabs MP3 (UR) → ffmpeg → PCM 16kHz
-      │
- play_audio()        ← 640-byte chunks, sleep(0.018), AS_AUDIO_SLIN16 (0x12)
-      │
- run() finally       ← fires post_call_actions() on ALL exits
-```
-
-**AudioSocket frames:** `[type:1B][length:2B BE][data]`
-- `0x00` = HANGUP
-- `0x01` = UUID  
-- `0x10` = AUDIO (SLIN 8kHz) — not used
-- `0x12` = AUDIO_SLIN16 — 16kHz PCM, standard
-- `0xff` = ERROR
-
-**Key timings:**
-- 640 bytes per chunk = 320 samples = 20ms audio at 16kHz
-- `asyncio.sleep(0.018)` = 18ms sleep for 20ms audio = 2ms buffer per chunk
-- This builds ~400ms buffer over a 10s response, absorbing event loop jitter
-- Original bug: sleep(0.020) + write overhead ≈ 21ms cycle for 20ms audio → buffer drains → "lag jurk"
-
----
-
-## Zara — Bilingual Receptionist (ext 5000)
-
-Entry point for all callers. Detects language, understands reason, routes accordingly.
-
-**Language detection (`detect_language()`):**
-- Arabic Unicode `\u0600–\u06ff` → Urdu
-- Devanagari `\u0900–\u097f` → Urdu (Deepgram `multi` transcribes Urdu speech as Hindi script)
-- ASCII keyword `"urdu"` / `"urdoo"` → Urdu
-- On language switch: conversation history cleared + greeting spoken directly (LLM NOT called for triggering utterance)
-
-**Routing:**
-- Travel / Hajj / Umrah / booking / holiday / visa / tour → English → Sara (9000), Urdu → Saima (8000)
-- Accounts / billing / payment → ext 2000
-- Complaint / support → ext 4000
-- Speak to supervisor → attended transfer to ext 3000 via AMI
-- **Does NOT transfer to sales unless caller explicitly mentions travel**
-
-**Attended transfer to supervisor (ext 3000):**
-1. Speaks hold message → sets `thinking=True` + `transfer_in_progress=True`
-2. AMI Originate → calls supervisor ext 3000
-3. Tracks `OriginateResponse` event — exits race immediately on reject/no-answer
-4. Supervisor answers → `Bridge()` fires → AudioSocket HANGUP → call ends cleanly
-5. If no answer → 2s pause → second attempt
-6. **Both attempts fail:** sets `supervisor_attempted=True` → notify via ntfy → ask caller name+number for callback
-7. Callback window based on PKT time (UTC+5): 9am–1pm "within 30 min", 1pm–6pm "before close of business", outside hours "first thing tomorrow 9 AM"
-
-**Zara phonetic normaliser (`urdu_phonetic()` from `agent_lib/speech.py`):**
-- Runs on every Urdu TTS string before ElevenLabs
-- `PSBA` → `پی ایس بی اے`, `Sahulat Bazaar` → `سہولت بازار`, etc.
-- Also handles `@` → ` ایٹ `, `.pk` → ` ڈاٹ پی کے`, digit splitting
-
-**Zara does NOT:** create Chatwoot leads, book calendar appointments, send leads ntfy, do CRM lookup
-
-**AMI user:** `zara` / `ZaraAMI2025` (has `originate` write permission for supervisor transfer)
-
----
-
-## Sara — English Customer Service (ext 9000)
-
-**System prompt:** PSBA English customer service — warm, professional, concise
-- Max 2 sentences for simple replies, more for informational
-- Does NOT announce call recording (IVR plays this automatically before connecting)
-- Supervisor transfer via `[TRANSFER:SUPERVISOR]` tag — same mechanism as Saima
-- Lead extraction uses Groq (not OpenAI) to save credit
-
-**TTS:** Deepgram Aura `aura-asteria-en` — MP3 → ffmpeg soxr → PCM 16kHz
-
----
-
-## Saima — Urdu Customer Service (ext 8000)
-
-**System prompt:** Natural conversational Urdu — rewritten to match Uplift helpdesk-agent style. Uses English loanwords naturally (call, team, delivery, product, app, discount, helpline). Sample dialogue embedded in prompt.
-
-**TTS:** Uplift TTS `helpdesk-agent` (WAV_22050_16) → ffmpeg `aresample=16000:resampler=soxr:precision=28` → PCM 16kHz SLIN16
-
-**`strip_gap_words()` and `urdu_phonetic()`:** These functions still exist in `agent_lib/speech.py` but are **NOT called** from Saima's `speak()` anymore. The LLM output is sent directly to TTS. They're retained for Zara's Urdu TTS pipeline and for backward compatibility.
-
-**No filler audio during LLM thinking:** `_FILLERS_UR = []` — empty list. Uplift TTS voice handles natural prosody at the voice level.
-
-**Hold music:** `/opt/aiagent/sounds/hold_music.raw` — 256000 bytes (8s PCM 16kHz, soxr upsampled from original 8kHz)
-
-**Supervisor announcement:** `/opt/aiagent/sounds/zara-supervisor-announce.wav` — 418KB pre-generated WAV
-
-**Barge-in:** 3+ Urdu words during speaking → triggers barge-in
-
----
-
-## Post-Call Pipeline (Sara + Saima)
-
-1. If < 2 turns AND `caller_phone` known → Chatwoot contact with `outcome=incomplete_call`
-2. If ≥ 2 turns → `extract_lead_data()` via **Groq** (free tier — `llama-4-scout-17b`)
-3. Phone fallback: if Groq missed phone → AMI `caller_phone` injected
-4. **ntfy** → `psba_leads` topic (self-hosted on port 8090)
-5. **Chatwoot** → create/update contact + conversation + transcript (private) + lead note
-6. **Odoo** → create `crm.lead` with transcript + metadata
-7. **Google Calendar** → callback booking *(pending Google service account JSON)*
-8. **Gmail** → HTML email *(optional, blank = skipped)*
-
-**Known issue — Odoo XMLRPC:** Transcript can contain characters invalid for XML, causing `ExpatError: not well-formed (invalid token)` in `create_lead()`. Need to sanitize transcript with XML character filtering before passing to XMLRPC.
-
----
-
-## Supervisor Transfer ([TRANSFER:SUPERVISOR] tag)
-
-**Used by:** Sara + Saima  
-**Mechanism:** LLM embeds `[TRANSFER:SUPERVISOR]` in response text → `parse_transfer_tag()` strips tag → speaks response → `do_blind_transfer()` → plays hold music (8s) → AMI `Redirect` to ext 3000
-
-**Transfer triggers (strict — only explicit conditions):**
-1. Caller explicitly asks for supervisor / manager / human
-2. Fraud — money already sent (caller confirms)
-3. Complaint with health injury or major financial loss
-4. Caller mentions FIA / court / legal action
-5. Caller is highly distressed and can't calm them
-
-**On failure:** Speaks graceful "lines busy" → takes name + number for callback. Call NEVER drops.
-
----
-
-## Knowledge Base
-
-`/opt/aiagent/knowledge_base.txt` — 8,456 chars, loaded into Sara + Saima system prompts.
-Local: `agent/knowledge_base.txt`
-
-**Contents:** PSBA overview, contact info (042-99001000, 03070002345, etc.), 12 Lahore bazaar locations, all 36 Punjab districts, product info (35% below market, prices change daily), app info, stall info, complaint channels.
-
----
-
-## Docker Services (all self-hosted on EC2)
-
-### Chatwoot CRM
-| Field | Value |
-|---|---|
-| Internal URL | `http://44.194.44.98:3000` |
-| Public HTTPS | `https://44-194-44-98.sslip.io` |
-| Login email | `nextvisionorganization@gmail.com` |
-| Account ID | 1, Inbox ID: 1 |
-| API Token | `ADvi1PAFuxSxZbzZmF1SaPPf` |
-| Install path | `/opt/chatwoot/` |
-| Running | rails + sidekiq + redis + postgres (all up 7+ days) |
-
-**Chatwoot API response:**
-- Contact creation: id at `response.payload.contact.id`
-- Conversation creation: id at `response.id` (top level)
-- Transcript: `POST /conversations/{id}/messages` — `message_type: "outgoing"`, `private: true`
-- Notes: `POST /contacts/{id}/notes`
-
-### ntfy Push
-| Field | Value |
-|---|---|
-| Internal server | `http://44.194.44.98:8090` |
-| Public HTTPS server | `https://ntfy.44-194-44-98.sslip.io` |
-| Running | Up 7 days |
-
-| Topic | Trigger | Sent by |
-|---|---|---|
-| `psba_leads` | Every complete call end | Sara, Saima |
-| `psba_supervisor` | Supervisor unavailable after 2 attempts | Zara |
-
-### Odoo 19 CE
-| Field | Value |
-|---|---|
-| Internal URL | `http://localhost:8069` |
-| Public HTTPS | `https://odoo.44-194-44-98.sslip.io` **— NOT IN NGINX YET** |
-| Default login | `admin` / `admin` |
-| DB name | `odoo`, DB password: `odoo2025` |
-| Install path | `/opt/odoo/` |
-| Running | Up 2 hours (restarted recently) |
-
-**Odoo client (`agent_lib/odoo.py`):**
-- `OdooClient(url, db, username, password)` — async wrapper over sync XMLRPC via `run_in_executor`
-- `search_partner(phone)` → lookup `res.partner` by phone
-- `create_lead(lead, conversation, call_id, agent_name)` → creates `crm.lead`
-- Lead mapping: `name` → `[Call] {name}`, `contact_name` → caller name, `phone` → caller phone, `description` → summary + transcript (last 20 turns) + metadata
-
-**Odoo Docker:**
-```bash
-cd /opt/odoo
-docker-compose ps
-docker-compose logs -f
-docker-compose restart
-```
-
----
-
-## nginx — HTTPS Reverse Proxy
-
-| Field | Value |
-|---|---|
-| Config | `/etc/nginx/conf.d/aicc.conf` |
-| SSL cert | `/etc/letsencrypt/live/44-194-44-98.sslip.io/fullchain.pem` |
-| Cert expiry | **2026-06-20 — EXPIRED (needs `sudo certbot renew`)** |
-| Routes configured | Chatwoot (`44-194-44-98.sslip.io`) + ntfy (`ntfy.44-194-44-98.sslip.io`) |
-| Routes MISSING | **Odoo** (`odoo.44-194-44-98.sslip.io` → localhost:8069) not added yet |
-
-**Renew SSL:**
-```bash
-sudo certbot renew
-sudo systemctl restart nginx
-```
-
----
-
-## Sleep Timing — Event Loop Jitter Compensation
-
-All audio loops use `sleep(0.018)` for 640-byte chunks (20ms audio at 16kHz):
-
-```python
-# play_audio and speak silence loops in all 3 agents:
-await asyncio.sleep(0.018)  # 18ms sleep for 20ms audio = 10% buffer
-```
-
-**Why 0.018 and not 0.020:**
-- 640 bytes = 320 samples = 20ms of audio at 16kHz
-- `asyncio.sleep(0.020)` has ~1-5ms jitter from event loop overhead
-- With write+drain (~1ms), actual cycle = 21-26ms per 20ms chunk → buffer slowly drains
-- `sleep(0.018)` gives 2ms slack per chunk → builds buffer → absorbs jitter
-- This was the original approach before the 0.020 "fix" caused the lag jitter
-
----
-
-## G.722 Wideband Audio
-
-Enabled on all PJSIP endpoints (codec order: g722 first, then ulaw):
-
-```ini
-[1000]
-disallow=all
-allow=g722
-allow=ulaw
-```
-
-Same pattern on all 8 endpoints (1000-4000, 1010, 1001-1003).
-
-**Zoiper paid tier** required for G.722. MicroSIP (UDP 5060) ulaw only.
+| `44-194-44-98.sslip.io` | localhost:3000 (Chatwoot) | ✅ Valid to 2026-09-21 |
+| `ntfy.44-194-44-98.sslip.io` | localhost:8090 | ✅ Valid to 2026-09-21 |
+| `odoo.44-194-44-98.sslip.io` | localhost:8069 | ✅ Valid to 2026-09-21 |
+
+Configs: `/etc/nginx/conf.d/aicc.conf` + `/etc/nginx/conf.d/odoo.conf`
 
 ---
 
 ## Systemd Services
 
-| Service | Controls | File |
-|---|---|---|
-| `aiagent` | Sara ext 9000 | `agent/aiagent.service` |
-| `saima` | Saima ext 8000 | `agent/saima.service` |
-| `zara` | Zara ext 5000 | `agent/zara.service` |
-| `nginx` | HTTPS reverse proxy | host systemd |
+| Service | Controls |
+|---|---|
+| `aiagent` | Sara ext 9000 |
+| `saima` | Saima ext 8000 |
+| `zara` | Zara ext 5000 |
+| `nginx` | HTTPS reverse proxy |
 
-All 3 agents running as `asterisk` user, `Restart=always`, `RestartSec=5`.
+All agents run as `asterisk` user, `Restart=always`.
 
+### Commands
 ```bash
-# Status
 sudo systemctl status aiagent saima zara nginx
-
-# Restart agents
 sudo systemctl restart aiagent saima zara
-
-# Live logs all agents
 sudo journalctl -u aiagent -u saima -u zara -o cat -f
-
-# Single agent recent logs
-sudo journalctl -u aiagent -o cat --no-pager --since '10 minutes ago'
-sudo journalctl -u saima  -o cat --no-pager --since '10 minutes ago'
-sudo journalctl -u zara   -o cat --no-pager --since '10 minutes ago'
 ```
 
 ---
 
-## SSH & Deploy
+## Per-Client Cost Breakdown
+
+| Item | Cost/mo | Who Pays | Notes |
+|---|---|---|---|
+| Hostinger KVM 4GB | **$5.19** | Us | 1 per client |
+| Deepgram STT Nova-3 (1,000 min) | **$4.30** | Us | $0.0043/min — target: self-host faster-whisper |
+| OpenAI GPT-4o-mini | **~$0.40** | Us | Negligible |
+| ElevenLabs (Urdu TTS) | **$5 ÷ #clients** | Us | Shared — $0.50/client at 10 clients |
+| SIP trunk | **$0 (client pays)** | Client | Their direct cost |
+| Domain + SSL | **~$0.83** | Us | $10/yr |
+| Uplift TTS | **TBD** | Us | Pricing not confirmed |
+| Open source (everything else) | **$0** | — | |
+
+**Total: ~$10.72/client/month** at 1,000 minutes.
+**15-20x cheaper than GHL** ($160-227/mo).
+
+---
+
+## Product Features — MVP v1 (All 15)
+
+### Section 1: Automated In-Call Actions
+
+| # | Feature | Status | Build Effort |
+|---|---|---|---|
+| 1.1 | **In-Call Appointment Booking** — Cal.com availability query + book mid-call | ❌ New | Deploy Cal.com Docker + wire API into agent tools |
+| 1.2 | **⭐ Reschedule/Cancel via Voice** — search booking → confirm → modify/delete | ❌ New | Cal.com API + verbal confirmation flow |
+| 1.3 | **In-Call Lead Qualification** — intent/budget/urgency extraction mid-conversation | 🔄 Shift | Move `extract_lead_data()` from post-call to mid-call |
+| 1.4 | **In-Call CRM Mutation** — Odoo `write()` during call | 🔄 Shift | Fire writes mid-call instead of batch at end |
+
+### Section 2: Unified Workspace & Voice CRM
+
+| # | Feature | Status | Build Effort |
+|---|---|---|---|
+| 2.1 | **Unified Omnichannel** — Chatwoot for WA/Email/FB/IG/Voice | 🔄 Minor | Enable WhatsApp + Email channels in Chatwoot |
+| 2.2 | **Chronological Contact History** — all interactions on Odoo `res.partner` | ✅ Done | Post-call writes to Chatwoot + Odoo working |
+| 2.3 | **⭐ Persistent Memory** — pre-load caller history into LLM context | ✅ Done | Chatwoot history injected via `_on_call_setup()` |
+| 2.4 | **First-Touch AI** — AI answers first on all channels | ✅ Done | Agents answer first on voice. Chatwoot bot config for text |
+
+### Section 3: Workflows & Automation
+
+| # | Feature | Status | Build Effort |
+|---|---|---|---|
+| 3.1 | **Visual Workflow Builder** — self-hosted n8n | ❌ New | Deploy Docker |
+| 3.2 | **AI-Powered Automation** — LLM extraction → structured fields | ✅ Done | Groq `extract_lead_data()` already does this |
+| 3.3 | **Call-Triggered Follow-up Chains** — post-call → multi-channel cascade | 🔄 Partial | Current post-call gather() works. n8n for WA/SMS/email |
+| 3.4 | **Automated Appointment Reminders** — Cal.com → n8n → scheduled WA | ❌ New | n8n + Cal.com webhook |
+| 3.5 | **⭐ Missed-Call-Text-Back** — NOANSWER → 60s → WhatsApp/SMS | ❌ New | Dialplan + n8n |
+
+### Section 4: Reporting & Dashboards
+
+| # | Feature | Status | Build Effort |
+|---|---|---|---|
+| 4.1 | **⭐ Voice AI Performance Dashboard** — Metabase on Odoo + CDR | ❌ New | Deploy Docker + 5-metric query |
+| 4.2 | **Operational Call Analytics** — Grafana live ops view | ❌ New | Deploy Docker + Prometheus exporter |
+| 4.3 | **Agent Performance Reports** — Odoo Helpdesk reporting | ✅ Done | Configure native Odoo dashboards |
+
+---
+
+## Build Roadmap
+
+| Order | Feature | Est. Time | Depends On |
+|---|---|---|---|
+| 1 | Deploy n8n Docker | 30 min | Nothing |
+| 2 | Deploy Cal.com Docker + API config | 1 hr | Nothing |
+| 3 | Deploy Metabase Docker + connect Odoo+CDR | 30 min | Nothing |
+| 4 | 1.1 In-Call Booking — agent tool for Cal.com | 2 hr | Cal.com deployed |
+| 5 | 1.2 Reschedule/Cancel — search+modify tools | 2 hr | Cal.com deployed |
+| 6 | 1.3 Mid-call lead qualification | 1 hr | Nothing |
+| 7 | 1.4 Mid-call CRM writes | 1 hr | Nothing |
+| 8 | 3.5 Missed-Call-Text-Back — dialplan + n8n | 2 hr | n8n deployed |
+| 9 | 3.4 Appointment Reminders — n8n workflow | 1 hr | Cal.com + n8n deployed |
+| 10 | Verifying Chatwoot WA/Email channels config | 1 hr | Nothing |
+| 11 | 4.2 Grafana + Prometheus | 1 hr | Nothing |
+
+**Total new build: ~9-10 hours.** All 15 features present in v1.
+
+---
+
+## Deploy Commands
 
 ```powershell
 # SSH
 ssh -i "D:\Cloudops24\AICC\AICCkey.pem" ec2-user@44.194.44.98
 
-# Deploy all agents
+# Deploy agents
 scp -i "D:\Cloudops24\AICC\AICCkey.pem" agent/voice_agent.py agent/saima.py agent/zara.py ec2-user@44.194.44.98:/tmp/
 ssh -i "D:\Cloudops24\AICC\AICCkey.pem" ec2-user@44.194.44.98 "sudo cp /tmp/voice_agent.py /tmp/saima.py /tmp/zara.py /opt/aiagent/ && sudo systemctl restart aiagent saima zara"
 
 # Deploy agent_lib
 scp -i "D:\Cloudops24\AICC\AICCkey.pem" -r agent_lib/ ec2-user@44.194.44.98:/tmp/agent_lib/
 ssh -i "D:\Cloudops24\AICC\AICCkey.pem" ec2-user@44.194.44.98 "sudo cp -r /tmp/agent_lib/* /opt/aiagent/agent_lib/ && sudo chown -R asterisk:asterisk /opt/aiagent/agent_lib/ && sudo systemctl restart aiagent saima zara"
+
+# Deploy engine.py only
+scp -i "D:\Cloudops24\AICC\AICCkey.pem" agent_lib/engine.py ec2-user@44.194.44.98:/tmp/engine.py
+ssh -i "D:\Cloudops24\AICC\AICCkey.pem" ec2-user@44.194.44.98 "sudo cp /tmp/engine.py /opt/aiagent/agent_lib/engine.py && sudo chown asterisk:asterisk /opt/aiagent/agent_lib/engine.py && sudo systemctl restart aiagent saima zara"
 ```
 
 ---
 
-## Asterisk Configuration
+## Prompt Extraction — Client Customization System
 
-### `/etc/asterisk/extensions.conf`
-```ini
-[from-internal]
-exten => 1000,1,Dial(PJSIP/1000,30)
-exten => 1000,n,Hangup()
-exten => 1010,1,Dial(PJSIP/1010,30)
-exten => 1010,n,Hangup()
-exten => 9000,1,Answer()
-exten => 9000,n,Wait(1)
-exten => 9000,n,Set(GLOBAL(SARA_CALLERID)=${CALLERID(num)})
-exten => 9000,n,AudioSocket(00000000-0000-0000-0000-000000000001,127.0.0.1:9092)
-exten => 9000,n,Hangup()
-exten => 8000,1,Answer()
-exten => 8000,n,Wait(1)
-exten => 8000,n,Set(GLOBAL(SAIMA_CALLERID)=${CALLERID(num)})
-exten => 8000,n,AudioSocket(00000000-0000-0000-0000-000000000002,127.0.0.1:9094)
-exten => 8000,n,Hangup()
-exten => 5000,1,Answer()
-exten => 5000,n,Wait(1)
-exten => 5000,n,Set(GLOBAL(ZARACHAN)=${CHANNEL})
-exten => 5000,n,AudioSocket(00000000-0000-0000-0000-000000000003,127.0.0.1:9096)
-exten => 5000,n,Hangup()
-exten => 2000,1,Dial(PJSIP/2000,30)
-exten => 2000,n,Playback(vm-nobodyavail)
-exten => 2000,n,Hangup()
-exten => 3000,1,Dial(PJSIP/3000,30)
-exten => 3000,n,Hangup()
-exten => 4000,1,Dial(PJSIP/4000,30)
-exten => 4000,n,Playback(vm-nobodyavail)
-exten => 4000,n,Hangup()
+Prompts are now **separated from Python code** into text files. This is the key that makes cloning for new clients work.
 
-[zara-supervisor]
-exten => check,1,Answer()
-exten => check,n,Wait(1)
-exten => check,n,Playback(/opt/aiagent/sounds/zara-supervisor-announce)
-exten => check,n,WaitExten(20)
-exten => check,n,Hangup()
-exten => 1,1,Bridge(${BRIDGETO},p)
-exten => 1,n,Hangup()
+| Agent | Python file | Prompt file(s) | KB file |
+|---|---|---|---|
+| Saima (Urdu ext 8000) | `saima.py` | `saima_prompt.txt` | `knowledge_base.txt` |
+| Sara (English ext 9000) | `voice_agent.py` | `sara_prompt.txt` | `knowledge_base.txt` |
+| Zara (Bilingual ext 5000) | `zara.py` | `zara_prompt_en.txt` + `zara_prompt_ur.txt` | (none) |
+
+**How it works at runtime:**
+```python
+prompt_template = prompt_file.read_text()
+SYSTEM_PROMPT = prompt_template.replace("{KNOWLEDGE_BASE}", knowledge_base_text)
 ```
 
-### `/etc/asterisk/manager.conf`
-```
-[zara] secret=ZaraAMI2025  — read: system,call,reporting,originate  — write: system,call,originate
-[sara] secret=SaraAMI2025  — read: system,call,reporting           — write: system,call
-[saima] secret=SaimaAMI2025 — read: system,call,reporting          — write: system,call
+### To customize for a new client:
+1. Replace `*_prompt.txt` files with client-specific prompts (change agent name, company name, domain facts)
+2. Replace `knowledge_base.txt` with client's products/locations/contacts
+3. Update `.env` (API keys, ports, extensions)
+4. `systemctl restart saima aiagent zara` — done
+
+### To pull framework updates (safe):
+```bash
+# Pulls only .py + agent_lib changes, NEVER touches prompt .txt files or .env
+git pull
+sudo systemctl restart aiagent saima zara
 ```
 
-### PJSIP Endpoints
-8 endpoints (1000–4000, 1010, 1001–1003). All have G.722 first. Passwords follow pattern `{Extension}2025!` (e.g. `Times2025!` for ext 1000).
+---
+
+## Git Workflow
+
+**Branch strategy:** Simple GitHub Flow
+- `main` = always production-ready, tested code
+- `feature/<name>` = branch off main, work, PR merge back
+- `fix/<name>` = hotfixes
+- Tag releases: `v1.0.0`, `v1.1.0`
+
+**What goes in git:**
+| In git (framework) | NOT in git (per-client) |
+|---|---|
+| `agent_lib/` — shared engine | `.env` — secrets |
+| `agent/*.py` — agent entry points | `*.pem`, `*.key` — certs |
+| `agent/*.service` — systemd | `agent/*_prompt.txt` — client prompts |
+| `deploy/` — Docker configs | `agent/knowledge_base.txt` — client KB |
+| `lambda_code/` — Lambda scheduler | |
+| `agent/dashboard.py` | |
+
+### New client deployment:
+```bash
+# On client's Hostinger KVM:
+git clone <repo> /opt/aiagent/
+# Then replace: *_prompt.txt, knowledge_base.txt, .env
+# Configure Asterisk, Docker services, SSL
+# systemctl start aiagent saima zara
+# Test call → live
+```
+
+### Framework updates to existing clients:
+```bash
+# On client's KVM:
+cd /opt/aiagent && git pull   # only .py + agent_lib changed
+sudo systemctl restart aiagent saima zara
+```
+
+---
+
+## Post-Deploy Automation (for scaling)
+
+```
+Packer → build golden AMI with pre-installed stack
+Terraform → deploy AMI + networking + RDS + Cloudflare DNS
+Ansible → post-deploy config (prompts, KB import, SSL check)
+Cloudflare Tunnel → secure by default, no public SSH
+```
 
 ---
 
 ## Key Design Decisions
 
-- **All config in .env** via `agent_lib/config.py` — no more hardcoded keys in agent files
-- **16kHz audio pipeline** with soxr resampler for highest quality
-- **AudioSocket SLIN16 (0x12)** for 16kHz PCM (was 0x10 = 8kHz SLIN)
-- **8kHz Deepgram STT** — incoming 16kHz audio downsampled to 8kHz via decimation before STT
-- **sleep(0.018)** for event loop jitter compensation — builds 2ms buffer per chunk
-- **OpenAI for conversation** (latency critical), **Groq for extraction** (free tier, not latency critical)
+- **Shared AgentEngine base class** eliminates ~70% code duplication across agents
+- **16kHz audio pipeline** with soxr resampler
+- **AudioSocket SLIN16 (0x12)** for 16kHz PCM
+- **8kHz Deepgram STT** — incoming 16kHz audio downsampled via decimation
+- **sleep(0.018)** for event loop jitter compensation
+- **GPT-4o-mini for conversation** (latency critical), **Groq for extraction** (free tier)
 - **[TRANSFER:SUPERVISOR] tag** — LLM-triggered blind transfer via AMI Redirect
-- **`strip_gap_words()` and `urdu_phonetic()`** functions exist but NOT called from Saima — removed because they mangled natural LLM output. Still used by Zara.
-- **No filler audio** during LLM thinking — `_FILLERS_UR = []`
+- **Open source first** — 90% of stack is free. Cost centers: compute ($5.19) + Deepgram ($4.30)
+- **MVP v1 ships all 15 features** — no feature deferred. Latency/RAG/GPU tools in v2.
+- **Single-tenant** — cloned instance per client, no multi-tenant complexity
 
 ---
 
-## API Keys & Services Status
+## PSBA-Specific Reference
 
-| Service | Used By | Status |
-|---|---|---|
-| Deepgram STT (Nova-3) | All agents | Active — ~$197 prepaid |
-| Deepgram TTS Aura | Zara EN, Sara | Active — included in prepaid |
-| OpenAI GPT-4o-mini | All agents (conversation) | Active — ~$5 remaining |
-| Groq Llama-4-Scout-17B | Sara, Saima (extraction) | Active — free (500K TPD) |
-| ElevenLabs Sana Flash v2.5 | Zara UR only | Active — $5/mo, 15K chars left |
-| Uplift TTS helpdesk-agent | Saima | Active — pricing TBD |
-| ntfy (self-hosted) | All agents | Active — free |
-| Chatwoot (self-hosted) | Sara, Saima | Active — free |
-| Odoo 19 CE (self-hosted) | Sara, Saima | Active — XMLRPC error needs fix |
-| Google Calendar | Sara, Saima | Wired, needs JSON key |
-| WhatsApp Business API | All agents (planned) | Pending subscription |
-
----
-
-## Known Issues
-
-| Issue | Severity | Fix |
-|---|---|---|
-| **SSL cert expired** (2026-06-20) | HIGH — Chatwoot/ntfy HTTPS broken | `sudo certbot renew && sudo systemctl restart nginx` |
-| **Odoo XMLRPC** — invalid XML chars in transcript → ExpatError | MEDIUM — Odoo leads not created | Sanitize transcript with `re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', '', transcript)` in `odoo.py:create_lead()` |
-| **Odoo route missing from nginx** | MEDIUM — no HTTPS for Odoo | Add server block for `odoo.44-194-44-98.sslip.io` → localhost:8069 |
-| **Lag jitter** from sleep(0.020) | FIXED — changed to 0.018 | Deployed |
-| **Saima system prompt** outdated sections in CHECKPOINTS.md | Documentation | Updated this file |
-
----
-
-## SIP Phone
-
+### SIP Phone
 ```
 Server: 44.194.44.98  |  Username: 1000  |  Password: Times2025!
 Zoiper: TLS port 5061, SRTP on, verify cert OFF
 MicroSIP: UDP port 5060
 ```
 
----
-
-## AWS Security Group — Open Ports
-
+### Security Group Ports
 | Port | Service | Access |
 |---|---|---|
 | 22 | SSH | Your IP |
-| 80 | HTTP (nginx — Let's Encrypt validation) | 0.0.0.0/0 |
-| 443 | HTTPS (nginx — Chatwoot + ntfy) | 0.0.0.0/0 |
-| 5060 | SIP UDP (MicroSIP) | Your IP |
-| 5061 | SIP TLS (Zoiper) | Your IP |
-| 3000 | Chatwoot direct | Your IP |
-| 8090 | ntfy direct | Your IP |
+| 80/443 | HTTP/HTTPS | 0.0.0.0/0 |
+| 5060/5061 | SIP | Your IP |
+| 3000 | Chatwoot | Your IP |
+| 8090 | ntfy | Your IP |
 | 8080 | Dashboard | Your IP |
-| 8069 | Odoo direct | Your IP |
-
----
-
-## Pending Activations
-
-| Item | What's needed | Status |
-|---|---|---|
-| Google Calendar | Upload `google_service_account.json` to `/opt/aiagent/` + pip install google libraries + set GOOGLE_CALENDAR_ID | Wired, needs JSON |
-| WhatsApp Business API | Get API credentials → integrate post-call message | Planned |
-| SSL renewal | `sudo certbot renew` (expired June 20) | Needs action |
-| Odoo nginx route | Add server block for `odoo.44-194-44-98.sslip.io` | Needs action |
-| Odoo XML sanitize | Fix `create_lead()` to strip invalid XML chars | Needs action |
+| 8069 | Odoo | Your IP |

@@ -1,5 +1,42 @@
 # Checkpoints — PSBA AI Voice Call Center
 
+## 2026-06-24 — Saima v5: Markdown lockdown + Domain guard + Repeat prevention
+
+### Changes Made
+
+| # | Change | Files | Status |
+|---|---|---|---|
+| 1 | **Prompt rewritten v5** — 255→78 lines, NO MARKDOWN, domain guard, repeat prevention, graceful exit | `agent/saima.py` (lines 88-166) | Deployed |
+| 2 | **`normalize_tts_text()`** — added markdown stripping (bold, italic, lists, tables, headings) before TTS | `agent_lib/speech.py` | Deployed |
+| 3 | **Location protocol** — never list addresses, ask area first, conversational only | `agent/saima.py` | Deployed |
+| 4 | **Domain guard** — non-PSBA topics (signal, phone, dictionary) explicitly redirected | `agent/saima.py` | Deployed |
+| 5 | **3-repeat rule** — same question 3× → provide helpline, end call gracefully | `agent/saima.py` | Deployed |
+
+### What was broken (from live call logs)
+
+- LLM outputting `**bold**` and `1. numbered lists` → TTS reading asterisks literally
+- Same 12-location list repeated 4+ times in one call
+- Gave dictionary definition of "سگنل" + phone restart advice (off-domain)
+- 6-8 sentence responses (prompt said 4-5 max)
+- No graceful exit — same info looped endlessly
+
+### Root cause
+
+- Prompt contained tables and formatting examples that LLM learned to mimic
+- No explicit penalty for off-domain answers
+- No repeat-detection mechanism
+- "4-5 max" too generous for phone call — LLM always pushes limit
+
+### What's Still Broken (unchanged)
+
+| Issue | Severity |
+|---|---|
+| SSL cert expired 2026-06-20 | HIGH — needs `sudo certbot renew` |
+| Odoo XMLRPC: invalid XML chars in transcript → ExpatError | MEDIUM |
+| Odoo route missing from nginx | MEDIUM |
+
+---
+
 ## 2026-06-23 — Saima Ugprade: Natural Urdu Prompt + Sleep Fix + Architecture Audit
 
 ### Changes Made

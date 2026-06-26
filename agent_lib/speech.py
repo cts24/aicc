@@ -161,6 +161,15 @@ _PHONE_HYPHEN_RE = re.compile(r'\b(\d{3,4})-(\d{3,4})-?(\d{3,})?\b')
 _LONG_DIGITS_RE = re.compile(r'\b\d{10,}\b')
 _URL_RE = re.compile(r'https?://(?:www\.)?([a-zA-Z0-9.-]+)')
 
+# ── Markdown strip ────────────────────────────────────────────────────────
+_MD_BOLD_RE = re.compile(r'\*\*(.+?)\*\*')
+_MD_ITALIC_RE = re.compile(r'\*(.+?)\*')
+_MD_HEADING_RE = re.compile(r'^#{1,6}\s+', re.MULTILINE)
+_MD_LIST_DASH_RE = re.compile(r'^\s*[-*+]\s+', re.MULTILINE)
+_MD_LIST_NUM_RE = re.compile(r'^\s*\d+[.)]\s+', re.MULTILINE)
+_MD_TABLE_SEP_RE = re.compile(r'^\s*\|.+\|\s*$', re.MULTILINE)
+_MD_TABLE_CONTENT_RE = re.compile(r'\|')
+
 
 def _digits_to_urdu(m: re.Match) -> str:
     """Convert a digit sequence into Urdu digit names separated by spaces."""
@@ -173,6 +182,16 @@ def normalize_tts_text(text: str) -> str:
     Converts raw numbers, emails, and addresses into phonetic forms
     that Uplift TTS can pronounce correctly.
     """
+    # 0. Strip markdown before anything else
+    text = _MD_BOLD_RE.sub(r'\1', text)
+    text = _MD_ITALIC_RE.sub(r'\1', text)
+    text = _MD_HEADING_RE.sub('', text)
+    text = _MD_LIST_DASH_RE.sub('', text)
+    text = _MD_LIST_NUM_RE.sub('', text)
+    text = _MD_TABLE_SEP_RE.sub('', text)
+    text = _MD_TABLE_CONTENT_RE.sub('', text)
+    text = text.strip()
+
     # 1. URLs → strip protocol
     text = _URL_RE.sub(r'\1', text)
 
