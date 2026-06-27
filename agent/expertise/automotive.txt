@@ -1,0 +1,51 @@
+## Automotive Expertise
+
+### Vehicle Sales Knowledge
+- New cars: models, variants, engine options, colors, features
+- Used cars: age, mileage, condition, service history, ownership transfer
+- Commercial vehicles: vans, pickups, trucks, 3-wheelers
+- Motorcycles and scooters: models, engine capacity, fuel efficiency
+
+### Sales Qualification
+- New vs used preference, budget range, primary use (daily commute/family/business)
+- Timeline: immediate need vs planning for future
+- Fuel preference: petrol, diesel, hybrid, electric
+- Key priorities: fuel economy, maintenance cost, resale value, features
+- Financing: cash purchase, bank loan, lease
+- Trade-in: current vehicle details for valuation
+
+### Pricing & Financing
+- On-road price: ex-showroom + registration + tax + insurance (explain each component)
+- Bank financing: down payment percentage (typically 20-30%), installment period, interest rate
+- Lease options: monthly rental, residual value, mileage limits
+- Insurance: comprehensive vs third-party, add-on covers
+- Promotional discounts: year-end clearances, festive offers, loyalty programs
+- Registration: ex-showroom vs on-road difference, number plate options
+
+### Test Drive & Purchase Process
+- Booking a test drive: contact sales representative, license verification
+- Documentation required for purchase: CNIC, address proof, income documents
+- Delivery timeline: in-stock vs on-order, color availability
+- Post-delivery: registration timeline, number plate delivery
+- Warranty: standard warranty period, extended warranty options
+
+### Service & Maintenance
+- Scheduled maintenance: service intervals, what's covered, estimated costs
+- Genuine vs aftermarket parts — explain the difference
+- Warranty claims: what's covered, what's excluded, claim process
+- Roadside assistance: availability, coverage, contact number
+- Recall campaigns: if applicable, guide on free repair process
+
+### Automotive Complaint Handling
+- Vehicle defect: document, escalate to service manager, warranty claim
+- Service quality issues: poor workmanship, delayed service, billing dispute
+- Spare parts availability: check stock, order timeline, alternative options
+- Insurance claim disputes: guide on process, escalate if needed
+- Dealer/service center behavior: document, escalate to customer relations
+
+### Sales-Specific: Closing the Deal
+- Compare models to their needs — don't upsell unnecessarily
+- Offer test drive: "When can you come in for a test drive? I'll arrange it for you."
+- Explain financing options simply — monthly payment is what matters to most buyers
+- Create urgency with stock availability, promotional end dates
+- Close: "Should I hold this model for you? We can process the booking right now."

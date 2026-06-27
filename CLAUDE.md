@@ -65,7 +65,12 @@ This file provides guidance when working with this repository.
 | Sana | Urdu Sales | Nova-3 `ur` | Uplift TTS | `urdu_sales` |
 | Zoya | English Sales | Nova-2 `en-US` | Deepgram Aura | `english_sales` |
 
-**Config** — all agents use `agent_lib/config.py` which loads from `.env`. See `.env.example`.
+**Config** — all agents use `agent_lib/config.py` which loads from:
+1. `prompts/client_config.env` (non-secret per-client: COMPANY_NAME, INDUSTRY, agent names)
+2. `.env` (secrets: API keys, passwords — overrides client_config)
+3. Local `.env` (dev overrides)
+
+**PSBA reference** uses `INDUSTRY=retail_marketplace` (PSBA is a retail marketplace, not a government agency — the government context lives in client_context.txt).
 
 ---
 
@@ -301,10 +306,28 @@ Placeholder substitutions at runtime:
 | Agent | Type | Core file | Expertise | Industry config |
 |---|---|---|---|---|
 | Zara (ext 5000) | `receptionist` | `core/receptionist_persona.txt` | (none) | (none) |
-| Saima (ext 8000) | `urdu_support` | `core/urdu_support_persona.txt` | `expertise/{industry}.txt` | `INDUSTRY=public_sector` |
-| Sana (ext 8500) | `urdu_sales` | `core/urdu_sales_persona.txt` | `expertise/{industry}.txt` | `INDUSTRY=public_sector` |
-| Sara (ext 9000) | `english_support` | `core/english_support_persona.txt` | `expertise/{industry}.txt` | `INDUSTRY=public_sector` |
-| Zoya (ext 9500) | `english_sales` | `core/english_sales_persona.txt` | `expertise/{industry}.txt` | `INDUSTRY=public_sector` |
+| Saima (ext 8000) | `urdu_support` | `core/urdu_support_persona.txt` | `expertise/{industry}.txt` | `INDUSTRY=retail_marketplace` |
+| Sana (ext 8500) | `urdu_sales` | `core/urdu_sales_persona.txt` | `expertise/{industry}.txt` | `INDUSTRY=retail_marketplace` |
+| Sara (ext 9000) | `english_support` | `core/english_support_persona.txt` | `expertise/{industry}.txt` | `INDUSTRY=retail_marketplace` |
+| Zoya (ext 9500) | `english_sales` | `core/english_sales_persona.txt` | `expertise/{industry}.txt` | `INDUSTRY=retail_marketplace` |
+
+### Available Industry Modules
+
+```
+agent/expertise/
+├── retail_marketplace.txt    ← PSBA (consumer retail, vendor marketplace, delivery, returns)
+├── general.txt               ← Default fallback
+├── healthcare.txt            ← Hospitals, clinics, telemedicine, patient services
+├── education.txt             ← Schools, colleges, training centers, admissions
+├── real_estate.txt           ← Property developers, housing schemes, sales
+├── automotive.txt            ← Car dealers, showrooms, service centers
+├── travel.txt                ← Travel agencies, hotels, tour operators
+├── banking.txt               ← Banks, microfinance, financial services
+├── ecommerce.txt             ← Online stores, digital marketplaces
+├── public_sector.txt         ← Government/citizen services (kept for pure govt clients)
+```
+
+Industry = domain knowledge only. Government vs private sector context goes in `client_context.txt`.
 
 ### For a new client (deploy team workflow):
 
@@ -365,15 +388,32 @@ sudo systemctl restart aiagent saima zara zoya sana
 git clone <repo> /opt/aiagent/
 # Then replace: prompts/client_context.txt, prompts/knowledge_base.txt, .env
 # Configure Asterisk, Docker services, SSL
-# systemctl start aiagent saima zara
+# systemctl start aiagent saima zara zoya sana
 # Test call → live
 ```
+
+### Client Onboarding — Data Required from New Customer
+
+| # | What we need | Goes into | Who fills it | Example |
+|---|---|---|---|---|
+| 1 | Company name, helpline, industry | `prompts/client_config.env` | Deploy team from intake form | `COMPANY_NAME=PSBA` |
+| 2 | Company identity, domain, routing rules | `prompts/client_context.txt` | Deploy team + client input | "PSBA runs Sahulat Bazaars...", extensions list |
+| 3 | Products, services, locations, prices, policies | `prompts/knowledge_base.txt` | Scraped from client website + docs | Product catalog, price list, FAQ, T&C |
+| 4 | API keys, SIP trunk credentials, CRM creds | `.env` | Client provides (or we provision) | Deepgram key, Odoo URL, SIP credentials |
+| 5 | Agent names (optional) | `prompts/client_config.env` | Client preference | Default: Zara/Saima/Sara/Sana/Zoya |
+| 6 | CRM/Helpdesk data (Odoo, Chatwoot) | Pre-existing system | Client's existing database | Customer records, ticket history |
+| 7 | Asterisk PJSIP endpoints + SIP trunk | `/etc/asterisk/pjsip.conf` | Deploy team | Each agent + human extensions |
+| 8 | Website scraping → KB | Automated script (future) | Scraped from client website | FAQ, products, locations, hours |
+
+**Website/RAG integration** — the client's website, documentation, and FAQ are scraped into `knowledge_base.txt`. For now it's manual (copy-paste from their site). A future RAG pipeline can automate this: crawl their website → chunk → embed → retrieve mid-call.
+
+**CRM/DB** — Odoo + Chatwoot are already wired in `agent_lib/odoo.py` and `agent_lib/chatwoot.py`. Each client gets their own Odoo instance with their data. The agents read/write to their CRM automatically.
 
 ### Framework updates to existing clients:
 ```bash
 # On client's KVM:
 cd /opt/aiagent && git pull   # only .py + agent_lib changed
-sudo systemctl restart aiagent saima zara
+sudo systemctl restart aiagent saima zara zoya sana
 ```
 
 ---
@@ -391,6 +431,7 @@ Cloudflare Tunnel → secure by default, no public SSH
 
 ## Key Design Decisions
 
+- **Role-specialized core personas** — 6 core files: receptionist, english/urdu support, english/urdu sales. Each has years-of-experience backstory and role-specific methodology (BANT qualification, consultative selling, empathy-first support). Sales agents are different from support agents.
 - **Shared AgentEngine base class** eliminates ~70% code duplication across agents
 - **16kHz audio pipeline** with soxr resampler
 - **AudioSocket SLIN16 (0x12)** for 16kHz PCM
