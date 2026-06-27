@@ -4,6 +4,9 @@
 *.key
 google_service_account.json
 
+# Per-client prompts (agent personality, knowledge base)
+agent/prompts/
+
 # Python
 __pycache__/
 *.pyc

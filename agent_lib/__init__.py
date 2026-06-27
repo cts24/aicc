@@ -12,3 +12,4 @@ from .gmail import send_gmail_notification
 from .calendar import book_sales_appointment
 from .odoo import OdooClient
 from .llm import llm_respond, extract_name_phone, extract_lead_data, parse_transfer_tag
+from .prompt_builder import build_agent_prompt

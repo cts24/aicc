@@ -9,7 +9,6 @@ PSBA AI Voice Agent — Saima (Urdu, ext 8000)
 
 import asyncio
 import logging
-from pathlib import Path
 from typing import Optional
 
 import httpx
@@ -23,6 +22,7 @@ from agent_lib import (
 )
 from agent_lib.engine import AgentEngine
 from agent_lib.config import AgentConfig
+from agent_lib.prompt_builder import build_agent_prompt
 
 load_env()
 cfg: AgentConfig = load_saima_config()
@@ -32,13 +32,8 @@ log = setup_log(__name__)
 # ── Pre-cached filler phrases (empty — no fillers for Urdu TTS) ──────────────
 _FILLERS_UR: list[str] = []
 
-# ── Load Knowledge Base ───────────────────────────────────────────────────────
-KNOWLEDGE_BASE = cfg.kb_path.read_text() if cfg.kb_path.exists() else ""
-
-# ── Load system prompt from file ─────────────────────────────────────────────
-_SAIMA_PROMPT_PATH = Path(__file__).parent / "saima_prompt.txt"
-_SAIMA_PROMPT_TEMPLATE = _SAIMA_PROMPT_PATH.read_text(encoding="utf-8") if _SAIMA_PROMPT_PATH.exists() else ""
-SYSTEM_PROMPT = _SAIMA_PROMPT_TEMPLATE.replace("{KNOWLEDGE_BASE}", KNOWLEDGE_BASE)
+# ── Build system prompt from layered components ──────────────────────────────
+SYSTEM_PROMPT = build_agent_prompt(cfg, "ur")
 
 # ── Uplift REST TTS ───────────────────────────────────────────────────────────
 UPLIFT_TTS_REST_URL = "https://api.upliftai.org/v1/synthesis/text-to-speech"
@@ -443,7 +438,7 @@ async def main():
     log.info(f"  STT         : Deepgram Nova-3 ur (streaming)")
     log.info(f"  TTS         : Uplift REST voice={cfg.uplifts_tts_voice_id}")
     log.info(f"  Phrase cfg  : {_phrase_config_id or 'none'}")
-    log.info(f"  KB size     : {len(KNOWLEDGE_BASE):,} chars")
+    log.info(f"  Prompt size : {len(SYSTEM_PROMPT):,} chars")
     log.info("=" * 60)
 
     server = await asyncio.start_server(

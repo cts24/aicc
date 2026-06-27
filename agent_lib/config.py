@@ -42,7 +42,13 @@ def _ei(key: str, default: int = 0) -> int:
 class AgentConfig:
     agent_name: str
     audiosocket_port: int
-    kb_path: Path = Path("/opt/aiagent/knowledge_base.txt")
+    kb_path: Path = Path("/opt/aiagent/prompts/knowledge_base.txt")
+
+    # ── Product identity (per client override) ────────────────────────────
+    company_name: str = ""
+    helpline: str = ""
+    agent_type: str = ""          # urdu_agent | english_agent | receptionist
+    industry: str = "general"     # general | public_sector | real_estate | healthcare | etc.
 
     deepgram_api_key: str = ""
     openai_api_key: str = ""
@@ -101,7 +107,11 @@ class AgentConfig:
 
 def load_saima_config() -> AgentConfig:
     return AgentConfig(
-        agent_name="Saima",
+        agent_name=_e("SAIMA_AGENT_NAME", "Saima"),
+        company_name=_e("COMPANY_NAME", "PSBA"),
+        helpline=_e("HELPLINE", "0307-0002345"),
+        agent_type="urdu_agent",
+        industry=_e("INDUSTRY", "public_sector"),
         audiosocket_port=_ei("SAIMA_AUDIOSOCKET_PORT", 9094),
         deepgram_api_key=_e("DEEPGRAM_API_KEY"),
         openai_api_key=_e("OPENAI_API_KEY"),
@@ -131,13 +141,17 @@ def load_saima_config() -> AgentConfig:
         odoo_db=_e("ODOO_DB", "odoo"),
         odoo_username=_e("ODOO_USERNAME", "admin"),
         odoo_password=_e("ODOO_PASSWORD", "admin"),
-        kb_path=Path(_e("KB_PATH", "/opt/aiagent/knowledge_base.txt")),
+        kb_path=Path(_e("KB_PATH", "/opt/aiagent/prompts/knowledge_base.txt")),
     )
 
 
 def load_sara_config() -> AgentConfig:
     return AgentConfig(
-        agent_name="Sara",
+        agent_name=_e("SARA_AGENT_NAME", "Sara"),
+        company_name=_e("COMPANY_NAME", "PSBA"),
+        helpline=_e("HELPLINE", "0307-0002345"),
+        agent_type="english_agent",
+        industry=_e("INDUSTRY", "public_sector"),
         audiosocket_port=_ei("SARA_AUDIOSOCKET_PORT", 9092),
         deepgram_api_key=_e("DEEPGRAM_API_KEY"),
         openai_api_key=_e("OPENAI_API_KEY"),
@@ -164,13 +178,17 @@ def load_sara_config() -> AgentConfig:
         odoo_db=_e("ODOO_DB", "odoo"),
         odoo_username=_e("ODOO_USERNAME", "admin"),
         odoo_password=_e("ODOO_PASSWORD", "admin"),
-        kb_path=Path(_e("KB_PATH", "/opt/aiagent/knowledge_base.txt")),
+        kb_path=Path(_e("KB_PATH", "/opt/aiagent/prompts/knowledge_base.txt")),
     )
 
 
 def load_zara_config() -> AgentConfig:
     return AgentConfig(
-        agent_name="Zara",
+        agent_name=_e("ZARA_AGENT_NAME", "Zara"),
+        company_name=_e("COMPANY_NAME", "PSBA"),
+        helpline=_e("HELPLINE", "0307-0002345"),
+        agent_type="receptionist",
+        industry=_e("INDUSTRY", "public_sector"),
         audiosocket_port=_ei("ZARA_AUDIOSOCKET_PORT", 9096),
         deepgram_api_key=_e("DEEPGRAM_API_KEY"),
         openai_api_key=_e("OPENAI_API_KEY"),
@@ -187,5 +205,5 @@ def load_zara_config() -> AgentConfig:
         chatwoot_url=_e("CHATWOOT_URL", "http://44.194.44.98:3000"),
         chatwoot_token=_e("CHATWOOT_TOKEN"),
         google_calendar_id=_e("GOOGLE_CALENDAR_ID"),
-        kb_path=Path(_e("KB_PATH", "/opt/aiagent/knowledge_base.txt")),
+        kb_path=Path(_e("KB_PATH", "/opt/aiagent/prompts/knowledge_base.txt")),
     )

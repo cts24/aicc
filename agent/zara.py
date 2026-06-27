@@ -189,11 +189,10 @@ async def generate_supervisor_announcement() -> None:
     except Exception as e:
         log.warning(f"Could not generate supervisor announcement: {e}")
 
-# ── Load system prompts from files ───────────────────────────────────────────
-_ZARA_PROMPT_EN_PATH = Path(__file__).parent / "zara_prompt_en.txt"
-_ZARA_PROMPT_UR_PATH = Path(__file__).parent / "zara_prompt_ur.txt"
-SYSTEM_PROMPT_EN = _ZARA_PROMPT_EN_PATH.read_text(encoding="utf-8") if _ZARA_PROMPT_EN_PATH.exists() else ""
-SYSTEM_PROMPT_UR = _ZARA_PROMPT_UR_PATH.read_text(encoding="utf-8") if _ZARA_PROMPT_UR_PATH.exists() else ""
+# ── Build system prompts from layered components ─────────────────────────────
+from agent_lib.prompt_builder import build_agent_prompt
+SYSTEM_PROMPT_EN = build_agent_prompt(cfg, "en")
+SYSTEM_PROMPT_UR = build_agent_prompt(cfg, "ur")
 
 # ── ntfy Supervisor Alert ─────────────────────────────────────────────────────
 async def notify_supervisor(caller_info: dict) -> None:

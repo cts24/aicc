@@ -9,7 +9,6 @@ PSBA AI Voice Agent — Sara (English, ext 9000)
 
 import asyncio
 import logging
-from pathlib import Path
 from typing import Optional
 
 import httpx
@@ -22,6 +21,7 @@ from agent_lib import (
 )
 from agent_lib.engine import AgentEngine
 from agent_lib.config import AgentConfig
+from agent_lib.prompt_builder import build_agent_prompt
 
 load_env()
 cfg: AgentConfig = load_sara_config()
@@ -39,13 +39,8 @@ DEEPGRAM_TTS_URL = (
 # ── Filler phrases (English) ─────────────────────────────────────────────────
 _FILLERS_EN = ["Sure!", "Of course!", "Let me check.", "Absolutely!", "Happy to help!"]
 
-# ── Load Knowledge Base ───────────────────────────────────────────────────────
-KNOWLEDGE_BASE = cfg.kb_path.read_text() if cfg.kb_path.exists() else ""
-
-# ── Load system prompt from file ─────────────────────────────────────────────
-_SARA_PROMPT_PATH = Path(__file__).parent / "sara_prompt.txt"
-_SARA_PROMPT_TEMPLATE = _SARA_PROMPT_PATH.read_text(encoding="utf-8") if _SARA_PROMPT_PATH.exists() else ""
-SYSTEM_PROMPT = _SARA_PROMPT_TEMPLATE.replace("{KNOWLEDGE_BASE}", KNOWLEDGE_BASE)
+# ── Build system prompt from layered components ──────────────────────────────
+SYSTEM_PROMPT = build_agent_prompt(cfg, "en")
 
 
 class SaraEngine(AgentEngine):
@@ -207,7 +202,7 @@ async def main():
     log.info(f"  LLM         : OpenAI {cfg.openai_model}")
     log.info(f"  STT         : Deepgram Nova-2 en-US")
     log.info(f"  TTS         : Deepgram Aura (aura-asteria-en)")
-    log.info(f"  KB size     : {len(KNOWLEDGE_BASE):,} chars")
+    log.info(f"  Prompt size : {len(SYSTEM_PROMPT):,} chars")
     log.info("=" * 60)
 
     server = await asyncio.start_server(
