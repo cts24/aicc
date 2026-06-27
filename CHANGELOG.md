@@ -1,0 +1,45 @@
+# Changelog
+
+## v1.0.0 — 2026-06-27
+
+### Product Launch — AI Voice Call Center
+
+**Architecture:**
+- 4-layer prompt system (core + expertise + context + KB)
+- 6 specialized core persona files (receptionist, support EN/UR, sales EN/UR)
+- 9 industry expertise modules (retail_marketplace, healthcare, education, real_estate, automotive, travel, banking, ecommerce, general)
+- Runtime prompt assembly via `agent_lib/prompt_builder.py`
+
+**5 AI Agents:**
+| Agent | Ext | Role | Core Persona |
+|---|---|---|---|
+| Zara | 5000 | Bilingual Receptionist | `receptionist` |
+| Saima | 8000 | Urdu Support/Complaints | `urdu_support` |
+| Sana | 8500 | Urdu Sales Specialist | `urdu_sales` |
+| Sara | 9000 | English Support/Complaints | `english_support` |
+| Zoya | 9500 | English Sales Specialist | `english_sales` |
+
+**Integrations:**
+- Deepgram Nova-2/3 (STT), OpenAI GPT-4o-mini (LLM), Deepgram Aura / Uplift / ElevenLabs (TTS)
+- Odoo 19 CRM (leads, helpdesk tickets, partner lookup)
+- Chatwoot omnichannel (contact history, lead creation)
+- ntfy push notifications, Gmail email reports
+- Asterisk PJSIP + AMI (call control, transfers)
+- AudioSocket 16kHz SLIN16 pipeline
+
+**Deployment:**
+- Single-tenant, git-based: `git clone` + 4 config files = fully operational
+- systemd services for all 5 agents
+- PSBA (Punjab Sahulat Bazaar Authority) as reference implementation
+
+**Client Onboarding:**
+- 8 data points collected from client → mapped to 4 files (client_config.env, client_context.txt, knowledge_base.txt, .env)
+- Templates in `agent/templates/` for deploy team
+- Industry selected via `INDUSTRY=` — no code changes
+
+### Key Decisions
+- Role-specialized personas instead of hybrid generalists
+- Government/private sector handled in client_context.txt, not industry modules
+- Industry = domain knowledge only (retail, healthcare, real estate, etc.)
+- Full KB in prompt (no RAG) — fits in 4% of 128K context window
+- Separate client_config.env from secrets (.env)
