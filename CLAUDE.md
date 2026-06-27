@@ -47,20 +47,23 @@ This file provides guidance when working with this repository.
 
 | Ext | Agent | File | Port | Language |
 |---|---|---|---|---|
-| 5000 | Zara — Bilingual Receptionist | `zara.py` (~757 lines) | 9096 | EN + UR |
-| 9000 | Sara — English Customer Service | `voice_agent.py` (~347 lines) | 9092 | EN |
-| 8000 | Saima — Urdu Customer Service | `saima.py` (~508 lines) | 9094 | UR |
+| 5000 | Zara — Bilingual Receptionist | `zara.py` | 9096 | EN + UR |
+| 8000 | Saima — Urdu Support/Complaints | `saima.py` | 9094 | UR |
+| 8500 | Sana — Urdu Sales Specialist | `sana.py` | 9099 | UR |
+| 9000 | Sara — English Support/Complaints | `voice_agent.py` | 9092 | EN |
+| 9500 | Zoya — English Sales Specialist | `zoya.py` | 9098 | EN |
 | 1000 | Owner SIP | — | — | — |
-| 1010-1003 | Additional SIP users | PJSIP | — | — |
 | 2000 | Accounts dept | PJSIP | — | — |
 | 3000 | Supervisor | PJSIP | — | — |
 | 4000 | Support dept | PJSIP | — | — |
 
-| Agent | STT | TTS | LLM (conversation) | LLM (extraction) |
+| Agent | Role | STT | TTS | Core Persona |
 |---|---|---|---|---|
-| Zara | Deepgram Nova-3 `multi` | Deepgram Aura (EN) + ElevenLabs Sana (UR) | OpenAI `gpt-4o-mini` | OpenAI `gpt-4o-mini` |
-| Sara | Deepgram Nova-2 `en-US` | Deepgram Aura `aura-asteria-en` | OpenAI `gpt-4o-mini` | Groq `llama-4-scout-17b` |
-| Saima | Deepgram Nova-3 `ur` | Uplift TTS helpdesk-agent | OpenAI `gpt-4o-mini` | Groq `llama-4-scout-17b` |
+| Zara | Receptionist | Nova-3 `multi` | Deepgram Aura + ElevenLabs | `receptionist` / `receptionist_ur` |
+| Saima | Urdu Support | Nova-3 `ur` | Uplift TTS | `urdu_support` |
+| Sara | English Support | Nova-2 `en-US` | Deepgram Aura | `english_support` |
+| Sana | Urdu Sales | Nova-3 `ur` | Uplift TTS | `urdu_sales` |
+| Zoya | English Sales | Nova-2 `en-US` | Deepgram Aura | `english_sales` |
 
 **Config** — all agents use `agent_lib/config.py` which loads from `.env`. See `.env.example`.
 
@@ -270,31 +273,59 @@ ssh -i "D:\Cloudops24\AICC\AICCkey.pem" ec2-user@44.194.44.98 "sudo cp /tmp/engi
 
 ---
 
-## Prompt Extraction — Client Customization System
+## Prompt Architecture — Layered System (v2)
 
-Prompts are now **separated from Python code** into text files. This is the key that makes cloning for new clients work.
+Prompts are assembled at runtime from **4 layers** in `agent_lib/prompt_builder.py`:
 
-| Agent | Python file | Prompt file(s) | KB file |
-|---|---|---|---|
-| Saima (Urdu ext 8000) | `saima.py` | `saima_prompt.txt` | `knowledge_base.txt` |
-| Sara (English ext 9000) | `voice_agent.py` | `sara_prompt.txt` | `knowledge_base.txt` |
-| Zara (Bilingual ext 5000) | `zara.py` | `zara_prompt_en.txt` + `zara_prompt_ur.txt` | (none) |
-
-**How it works at runtime:**
-```python
-prompt_template = prompt_file.read_text()
-SYSTEM_PROMPT = prompt_template.replace("{KNOWLEDGE_BASE}", knowledge_base_text)
+```
+Layer  —  PICCO  —  Source file          —  Who owns it
+────────────────────────────────────────────────────────────
+1        Persona    core/{type}_persona.txt     Our IP (never changes)
+2        Context    expertise/{industry}.txt    Built once per industry  
+3        Context    prompts/client_context.txt  Per-client (gitignored)
+4        Context    prompts/knowledge_base.txt  Per-client (gitignored)
 ```
 
-### To customize for a new client:
-1. Replace `*_prompt.txt` files with client-specific prompts (change agent name, company name, domain facts)
-2. Replace `knowledge_base.txt` with client's products/locations/contacts
-3. Update `.env` (API keys, ports, extensions)
-4. `systemctl restart saima aiagent zara` — done
+Placeholder substitutions at runtime:
+```
+{AGENT_NAME}     → cfg.agent_name (per-agent)
+{COMPANY_NAME}   → cfg.company_name (.env)
+{HELPLINE}       → cfg.helpline (.env)
+{CLIENT_CONTEXT} → prompts/client_context.txt
+{EXPERTISE}      → expertise/{industry}.txt
+{KNOWLEDGE_BASE} → prompts/knowledge_base.txt
+```
 
-### To pull framework updates (safe):
+### Agent file → core persona mapping
+
+| Agent | Type | Core file | Expertise | Industry config |
+|---|---|---|---|---|
+| Saima (ext 8000) | `urdu_agent` | `core/urdu_agent_persona.txt` | `expertise/{industry}.txt` | `INDUSTRY=public_sector` |
+| Sara (ext 9000) | `english_agent` | `core/english_agent_persona.txt` | `expertise/{industry}.txt` | `INDUSTRY=public_sector` |
+| Zara (ext 5000) | `receptionist` | `core/receptionist_persona.txt` | (none) | (none) |
+
+### For a new client (deploy team workflow):
+
+```
+1. git clone <repo> /opt/aiagent/
+2. Choose industry → set INDUSTRY=real_estate in .env
+3. Fill prompts/client_context.txt (agent name, company, contact, routing)
+4. Fill prompts/knowledge_base.txt (products, locations, prices)
+5. Fill .env (API keys, integrations, SIP trunk)
+6. systemctl restart aiagent saima zara
+```
+
+### To add a new industry module:
+```
+Create expertise/{industry_name}.txt following the PQP pattern:
+  - ## Persona: domain-specific role
+  - ## Key Knowledge: industry facts and terminology
+  - ## Local Expertise: Pakistan-specific knowledge (if applicable)
+  - ## Sales/Support Methodology: domain-specific techniques
+```
+
+### To pull framework updates:
 ```bash
-# Pulls only .py + agent_lib changes, NEVER touches prompt .txt files or .env
 git pull
 sudo systemctl restart aiagent saima zara
 ```
@@ -314,8 +345,11 @@ sudo systemctl restart aiagent saima zara
 |---|---|
 | `agent_lib/` — shared engine | `.env` — secrets |
 | `agent/*.py` — agent entry points | `*.pem`, `*.key` — certs |
-| `agent/*.service` — systemd | `agent/*_prompt.txt` — client prompts |
-| `deploy/` — Docker configs | `agent/knowledge_base.txt` — client KB |
+| `agent/*.service` — systemd | `agent/prompts/` — client context + KB |
+| `agent/core/` — persona + skills (our IP) | |
+| `agent/expertise/` — industry modules | |
+| `agent/templates/` — deploy team blueprints | |
+| `deploy/` — Docker configs | |
 | `lambda_code/` — Lambda scheduler | |
 | `agent/dashboard.py` | |
 
@@ -323,7 +357,7 @@ sudo systemctl restart aiagent saima zara
 ```bash
 # On client's Hostinger KVM:
 git clone <repo> /opt/aiagent/
-# Then replace: *_prompt.txt, knowledge_base.txt, .env
+# Then replace: prompts/client_context.txt, prompts/knowledge_base.txt, .env
 # Configure Asterisk, Docker services, SSL
 # systemctl start aiagent saima zara
 # Test call → live

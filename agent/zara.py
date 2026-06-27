@@ -47,6 +47,8 @@ SAMPLE_RATE = 16000
 # ── Extension Routing ─────────────────────────────────────────────────────────
 EXT_SARA       = "9000"
 EXT_SAIMA      = "8000"
+EXT_ZOYA       = "9500"
+EXT_SANA       = "8500"
 EXT_ACCOUNTS   = "2000"
 EXT_SUPERVISOR = "3000"
 EXT_SUPPORT    = "4000"
@@ -262,6 +264,8 @@ async def generate_and_send_report() -> str:
 TRANSFER_TAGS = {
     "[TRANSFER:SARA]":       EXT_SARA,
     "[TRANSFER:SAIMA]":      EXT_SAIMA,
+    "[TRANSFER:ZOYA]":       EXT_ZOYA,
+    "[TRANSFER:SANA]":       EXT_SANA,
     "[TRANSFER:ACCOUNTS]":   EXT_ACCOUNTS,
     "[TRANSFER:SUPERVISOR]": EXT_SUPERVISOR,
     "[TRANSFER:SUPPORT]":    EXT_SUPPORT,

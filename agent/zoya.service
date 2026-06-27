@@ -1,0 +1,17 @@
+[Unit]
+Description=AI Sales Agent — Zoya (English Sales, ext 9500)
+After=network.target asterisk.service zara.service
+
+[Service]
+Type=simple
+User=asterisk
+WorkingDirectory=/opt/aiagent
+ExecStart=/opt/aiagent/venv/bin/python3 /opt/aiagent/zoya.py
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=zoya
+
+[Install]
+WantedBy=multi-user.target

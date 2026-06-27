@@ -23,6 +23,8 @@ Thumbs.db
 
 # Temp
 temp/
+lambda_code.zip
+out.txt
 
 # Claude CLI settings
 .claude/
