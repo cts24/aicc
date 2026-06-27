@@ -259,16 +259,16 @@ sudo journalctl -u aiagent -u saima -u zara -o cat -f
 ssh -i "D:\Cloudops24\AICC\AICCkey.pem" ec2-user@44.194.44.98
 
 # Deploy agents
-scp -i "D:\Cloudops24\AICC\AICCkey.pem" agent/voice_agent.py agent/saima.py agent/zara.py ec2-user@44.194.44.98:/tmp/
-ssh -i "D:\Cloudops24\AICC\AICCkey.pem" ec2-user@44.194.44.98 "sudo cp /tmp/voice_agent.py /tmp/saima.py /tmp/zara.py /opt/aiagent/ && sudo systemctl restart aiagent saima zara"
+scp -i "D:\Cloudops24\AICC\AICCkey.pem" agent/voice_agent.py agent/saima.py agent/zara.py agent/zoya.py agent/sana.py ec2-user@44.194.44.98:/tmp/
+ssh -i "D:\Cloudops24\AICC\AICCkey.pem" ec2-user@44.194.44.98 "sudo cp /tmp/voice_agent.py /tmp/saima.py /tmp/zara.py /tmp/zoya.py /tmp/sana.py /opt/aiagent/ && sudo systemctl restart aiagent saima zara zoya sana"
 
 # Deploy agent_lib
 scp -i "D:\Cloudops24\AICC\AICCkey.pem" -r agent_lib/ ec2-user@44.194.44.98:/tmp/agent_lib/
-ssh -i "D:\Cloudops24\AICC\AICCkey.pem" ec2-user@44.194.44.98 "sudo cp -r /tmp/agent_lib/* /opt/aiagent/agent_lib/ && sudo chown -R asterisk:asterisk /opt/aiagent/agent_lib/ && sudo systemctl restart aiagent saima zara"
+ssh -i "D:\Cloudops24\AICC\AICCkey.pem" ec2-user@44.194.44.98 "sudo cp -r /tmp/agent_lib/* /opt/aiagent/agent_lib/ && sudo chown -R asterisk:asterisk /opt/aiagent/agent_lib/ && sudo systemctl restart aiagent saima zara zoya sana"
 
 # Deploy engine.py only
 scp -i "D:\Cloudops24\AICC\AICCkey.pem" agent_lib/engine.py ec2-user@44.194.44.98:/tmp/engine.py
-ssh -i "D:\Cloudops24\AICC\AICCkey.pem" ec2-user@44.194.44.98 "sudo cp /tmp/engine.py /opt/aiagent/agent_lib/engine.py && sudo chown asterisk:asterisk /opt/aiagent/agent_lib/engine.py && sudo systemctl restart aiagent saima zara"
+ssh -i "D:\Cloudops24\AICC\AICCkey.pem" ec2-user@44.194.44.98 "sudo cp /tmp/engine.py /opt/aiagent/agent_lib/engine.py && sudo chown asterisk:asterisk /opt/aiagent/agent_lib/engine.py && sudo systemctl restart aiagent saima zara zoya sana"
 ```
 
 ---
@@ -300,34 +300,40 @@ Placeholder substitutions at runtime:
 
 | Agent | Type | Core file | Expertise | Industry config |
 |---|---|---|---|---|
-| Saima (ext 8000) | `urdu_agent` | `core/urdu_agent_persona.txt` | `expertise/{industry}.txt` | `INDUSTRY=public_sector` |
-| Sara (ext 9000) | `english_agent` | `core/english_agent_persona.txt` | `expertise/{industry}.txt` | `INDUSTRY=public_sector` |
 | Zara (ext 5000) | `receptionist` | `core/receptionist_persona.txt` | (none) | (none) |
+| Saima (ext 8000) | `urdu_support` | `core/urdu_support_persona.txt` | `expertise/{industry}.txt` | `INDUSTRY=public_sector` |
+| Sana (ext 8500) | `urdu_sales` | `core/urdu_sales_persona.txt` | `expertise/{industry}.txt` | `INDUSTRY=public_sector` |
+| Sara (ext 9000) | `english_support` | `core/english_support_persona.txt` | `expertise/{industry}.txt` | `INDUSTRY=public_sector` |
+| Zoya (ext 9500) | `english_sales` | `core/english_sales_persona.txt` | `expertise/{industry}.txt` | `INDUSTRY=public_sector` |
 
 ### For a new client (deploy team workflow):
 
 ```
 1. git clone <repo> /opt/aiagent/
-2. Choose industry → set INDUSTRY=real_estate in .env
-3. Fill prompts/client_context.txt (agent name, company, contact, routing)
+2. Set INDUSTRY in prompts/client_config.env
+3. Fill prompts/client_context.txt (company identity, routing)
 4. Fill prompts/knowledge_base.txt (products, locations, prices)
 5. Fill .env (API keys, integrations, SIP trunk)
-6. systemctl restart aiagent saima zara
+6. Create Asterisk PJSIP endpoints for each agent
+7. systemctl daemon-reload && systemctl enable zoya sana
+8. systemctl start aiagent saima zara zoya sana
 ```
 
 ### To add a new industry module:
 ```
-Create expertise/{industry_name}.txt following the PQP pattern:
+Create expertise/{industry_name}.txt — one file serves both sales + support agents.
+Include sections for:
   - ## Persona: domain-specific role
-  - ## Key Knowledge: industry facts and terminology
+  - ## Key Knowledge: industry facts and terminology  
+  - ## Sales-Specific: buying signals, payment plans, closing context
+  - ## Support-Specific: complaint handling, refunds, escalation
   - ## Local Expertise: Pakistan-specific knowledge (if applicable)
-  - ## Sales/Support Methodology: domain-specific techniques
 ```
 
 ### To pull framework updates:
 ```bash
 git pull
-sudo systemctl restart aiagent saima zara
+sudo systemctl restart aiagent saima zara zoya sana
 ```
 
 ---
