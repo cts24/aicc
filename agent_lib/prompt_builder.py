@@ -5,7 +5,9 @@ from pathlib import Path
 
 log = logging.getLogger(__name__)
 
-_AGENT_DIR = Path(__file__).resolve().parent.parent / "agent"
+# Resolve base directory — works both locally (agent/ subdir) and on EC2 (flat layout)
+_BASE = Path(__file__).resolve().parent.parent
+_AGENT_DIR = _BASE / "agent" if (_BASE / "agent" / "core").is_dir() else _BASE
 
 
 def build_agent_prompt(cfg, language: str = "en") -> str:
