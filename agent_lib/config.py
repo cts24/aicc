@@ -6,6 +6,7 @@ from typing import Optional
 
 ENV_PATH = Path("/opt/aiagent/.env")
 LOCAL_ENV = Path(__file__).resolve().parent.parent / ".env"
+CLIENT_CONFIG = Path("/opt/aiagent/prompts/client_config.env")
 
 
 def _load_dotenv(path: Path) -> None:
@@ -23,8 +24,9 @@ def _load_dotenv(path: Path) -> None:
 
 
 def load_env() -> None:
-    _load_dotenv(ENV_PATH)
-    _load_dotenv(LOCAL_ENV)
+    _load_dotenv(CLIENT_CONFIG)   # non-secret per-client config (lowest priority)
+    _load_dotenv(ENV_PATH)        # secrets (overrides client_config)
+    _load_dotenv(LOCAL_ENV)       # local dev overrides
 
 
 def _e(key: str, default: str = "") -> str:
