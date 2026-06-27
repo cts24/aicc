@@ -44,10 +44,22 @@
 - Full KB in prompt (no RAG) — fits in 4% of 128K context window. **RAG deferred to v1.1** — needed when KB exceeds 200KB+.
 - Separate client_config.env from secrets (.env)
 
-## v1.1 — Planned
+## v1.1 — Post-Launch (Priority Order)
 
-- **RAG pipeline** — Qdrant + embeddings for clients with 200KB+ knowledge bases
+### Agent Super-Tuning (99.9% accuracy target)
+One agent at a time, starting with Saima:
+1. Record real calls → identify every error per agent
+2. Fix source of truth by error type:
+   - Wrong facts (location, pricing, policy) → `knowledge_base.txt`
+   - Robotic tone, unnatural language → `core/{type}_persona.txt` (voice rules)
+   - Bad objection handling, transfer decisions → `core/{type}_persona.txt` (methodology)
+   - Weak closing → `core/{type}_sales_persona.txt` (closing techniques)
+   - Wrong routing → `client_context.txt` + receptionist persona
+3. Role-play each fix → verify → repeat until 99.9%
+
+### Feature Builds
+- **RAG pipeline** — Qdrant + embeddings for clients with 200KB+ KB
 - **In-call appointment booking** — Cal.com integration
-- **Mid-call lead qualification** — move extraction from post-call to live
+- **Mid-call lead qualification** — extraction from post-call to live
 - **Missed-call-text-back** — n8n workflow
 - **Grafana + Prometheus** — live ops monitoring
