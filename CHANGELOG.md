@@ -41,5 +41,13 @@
 - Role-specialized personas instead of hybrid generalists
 - Government/private sector handled in client_context.txt, not industry modules
 - Industry = domain knowledge only (retail, healthcare, real estate, etc.)
-- Full KB in prompt (no RAG) — fits in 4% of 128K context window
+- Full KB in prompt (no RAG) — fits in 4% of 128K context window. **RAG deferred to v1.1** — needed when KB exceeds 200KB+.
 - Separate client_config.env from secrets (.env)
+
+## v1.1 — Planned
+
+- **RAG pipeline** — Qdrant + embeddings for clients with 200KB+ knowledge bases
+- **In-call appointment booking** — Cal.com integration
+- **Mid-call lead qualification** — move extraction from post-call to live
+- **Missed-call-text-back** — n8n workflow
+- **Grafana + Prometheus** — live ops monitoring
