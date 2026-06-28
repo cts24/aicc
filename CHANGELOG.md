@@ -47,15 +47,18 @@
 ## v1.1 — Post-Launch (Priority Order)
 
 ### Agent Super-Tuning (99.9% accuracy target)
-One agent at a time, starting with Saima:
-1. Record real calls → identify every error per agent
-2. Fix source of truth by error type:
+
+**Method:**
+1. Team sits for 1-2 hours per agent, calling and testing from every angle
+2. Notes every issue found — functional errors + technical + tone + accuracy
+3. Issue list given to developer → each error fixed at correct source layer:
    - Wrong facts (location, pricing, policy) → `knowledge_base.txt`
    - Robotic tone, unnatural language → `core/{type}_persona.txt` (voice rules)
    - Bad objection handling, transfer decisions → `core/{type}_persona.txt` (methodology)
    - Weak closing → `core/{type}_sales_persona.txt` (closing techniques)
    - Wrong routing → `client_context.txt` + receptionist persona
-3. Role-play each fix → verify → repeat until 99.9%
+4. Redeploy → retest → repeat until no issues remain
+5. Move to next agent (Saima → Sara → Zara → Zoya → Sana)
 
 ### Feature Builds
 - **RAG pipeline** — Qdrant + embeddings for clients with 200KB+ KB
