@@ -1,0 +1,77 @@
+services:
+  cal-db:
+    image: postgres:16
+    container_name: cal-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: calcom
+      POSTGRES_USER: calcom
+      POSTGRES_PASSWORD: calcom2025
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - cal-db-data:/var/lib/postgresql/data
+    networks:
+      - cal-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U calcom"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  cal-redis:
+    image: redis:alpine
+    container_name: cal-redis
+    restart: unless-stopped
+    command: redis-server --requirepass calredis2025
+    volumes:
+      - cal-redis-data:/data
+    networks:
+      - cal-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  calendso:
+    image: calcom/cal.com:latest
+    container_name: calcom
+    restart: unless-stopped
+    depends_on:
+      cal-db:
+        condition: service_healthy
+      cal-redis:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:3001:3000"
+    environment:
+      DATABASE_URL: postgresql://calcom:calcom2025@cal-db:5432/calcom
+      DATABASE_DIRECT_URL: postgresql://calcom:calcom2025@cal-db:5432/calcom
+      REDIS_URL: redis://:calredis2025@cal-redis:6379
+      NEXTAUTH_SECRET: calcom-nextauth-secret-psba-2025
+      NEXTAUTH_URL: https://cal.44-194-44-98.sslip.io
+      NEXT_PUBLIC_WEBAPP_URL: https://cal.44-194-44-98.sslip.io
+      CALENDSO_ENCRYPTION_KEY: "calcom-encryption-key-psba-2025-must-be-32-chars-long!"
+      CALCOM_LICENSE_KEY: ""
+      NEXT_PUBLIC_ALLOWED_HOSTNAMES: cal.44-194-44-98.sslip.io
+      NEXT_PUBLIC_TEAM_IMPERSONATION: "false"
+      DISABLE_SIGNUP: "false"
+      EMAIL_FROM: calcom@psba.gov.pk
+      EMAIL_SERVER_HOST: localhost
+      EMAIL_SERVER_PORT: "1025"
+      EMAIL_SERVER_USER: ""
+      EMAIL_SERVER_PASSWORD: ""
+    volumes:
+      - cal-uploads:/calcom/apps/web/public/uploads
+    networks:
+      - cal-net
+
+volumes:
+  cal-db-data:
+  cal-redis-data:
+  cal-uploads:
+
+networks:
+  cal-net:
+    driver: bridge

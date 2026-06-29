@@ -1,0 +1,18 @@
+[Unit]
+Description=Cal.com API microservice for AI agent booking
+After=network.target docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+User=asterisk
+Group=asterisk
+WorkingDirectory=/opt/aiagent/scripts
+ExecStart=/usr/bin/python3 -u /opt/aiagent/scripts/cal_api.py
+Restart=always
+RestartSec=5
+StandardOutput=append:/opt/aiagent/cal-api.log
+StandardError=append:/opt/aiagent/cal-api.log
+
+[Install]
+WantedBy=multi-user.target
