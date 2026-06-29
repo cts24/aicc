@@ -94,9 +94,9 @@ class AgentConfig:
     gmail_password: str = ""
     gmail_to: str = ""
 
-    google_service_account_file: str = "/opt/aiagent/google_service_account.json"
-    google_calendar_id: str = ""
-    appointment_duration_minutes: int = 30
+    cal_api_url: str = "http://127.0.0.1:8099"
+    cal_sales_event_type_id: int = 1
+    cal_support_event_type_id: int = 2
 
     odoo_url: str = "https://odoo.44-194-44-98.sslip.io"
     odoo_db: str = ""
@@ -138,7 +138,9 @@ def load_saima_config() -> AgentConfig:
         gmail_sender=_e("GMAIL_SENDER"),
         gmail_password=_e("GMAIL_PASSWORD"),
         gmail_to=_e("GMAIL_TO"),
-        google_calendar_id=_e("GOOGLE_CALENDAR_ID"),
+        cal_api_url=_e("CAL_API_URL", "http://127.0.0.1:8099"),
+        cal_sales_event_type_id=_ei("CALCOM_SALES_EVENT_TYPE_ID", 1),
+        cal_support_event_type_id=_ei("CALCOM_SUPPORT_EVENT_TYPE_ID", 2),
         odoo_url=_e("ODOO_URL", "https://odoo.44-194-44-98.sslip.io"),
         odoo_db=_e("ODOO_DB", "odoo"),
         odoo_username=_e("ODOO_USERNAME", "admin"),
@@ -175,7 +177,9 @@ def load_sara_config() -> AgentConfig:
         gmail_sender=_e("GMAIL_SENDER"),
         gmail_password=_e("GMAIL_PASSWORD"),
         gmail_to=_e("GMAIL_TO"),
-        google_calendar_id=_e("GOOGLE_CALENDAR_ID"),
+        cal_api_url=_e("CAL_API_URL", "http://127.0.0.1:8099"),
+        cal_sales_event_type_id=_ei("CALCOM_SALES_EVENT_TYPE_ID", 1),
+        cal_support_event_type_id=_ei("CALCOM_SUPPORT_EVENT_TYPE_ID", 2),
         odoo_url=_e("ODOO_URL", "https://odoo.44-194-44-98.sslip.io"),
         odoo_db=_e("ODOO_DB", "odoo"),
         odoo_username=_e("ODOO_USERNAME", "admin"),
@@ -212,7 +216,9 @@ def load_zoya_config() -> AgentConfig:
         gmail_sender=_e("GMAIL_SENDER"),
         gmail_password=_e("GMAIL_PASSWORD"),
         gmail_to=_e("GMAIL_TO"),
-        google_calendar_id=_e("GOOGLE_CALENDAR_ID"),
+        cal_api_url=_e("CAL_API_URL", "http://127.0.0.1:8099"),
+        cal_sales_event_type_id=_ei("CALCOM_SALES_EVENT_TYPE_ID", 1),
+        cal_support_event_type_id=_ei("CALCOM_SUPPORT_EVENT_TYPE_ID", 2),
         odoo_url=_e("ODOO_URL", "https://odoo.44-194-44-98.sslip.io"),
         odoo_db=_e("ODOO_DB", "odoo"),
         odoo_username=_e("ODOO_USERNAME", "admin"),
@@ -252,7 +258,6 @@ def load_sana_config() -> AgentConfig:
         gmail_sender=_e("GMAIL_SENDER"),
         gmail_password=_e("GMAIL_PASSWORD"),
         gmail_to=_e("GMAIL_TO"),
-        google_calendar_id=_e("GOOGLE_CALENDAR_ID"),
         odoo_url=_e("ODOO_URL", "https://odoo.44-194-44-98.sslip.io"),
         odoo_db=_e("ODOO_DB", "odoo"),
         odoo_username=_e("ODOO_USERNAME", "admin"),
@@ -283,6 +288,8 @@ def load_zara_config() -> AgentConfig:
         ntfy_server=_e("NTFY_SERVER", "http://44.194.44.98:8090"),
         chatwoot_url=_e("CHATWOOT_URL", "http://44.194.44.98:3000"),
         chatwoot_token=_e("CHATWOOT_TOKEN"),
-        google_calendar_id=_e("GOOGLE_CALENDAR_ID"),
+        cal_api_url=_e("CAL_API_URL", "http://127.0.0.1:8099"),
+        cal_sales_event_type_id=_ei("CALCOM_SALES_EVENT_TYPE_ID", 1),
+        cal_support_event_type_id=_ei("CALCOM_SUPPORT_EVENT_TYPE_ID", 2),
         kb_path=Path(_e("KB_PATH", "/opt/aiagent/prompts/knowledge_base.txt")),
     )

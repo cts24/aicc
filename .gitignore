@@ -17,6 +17,9 @@ venv/
 # Logs
 *.log
 
+# Temp files
+tmp/
+
 # OS
 .DS_Store
 Thumbs.db

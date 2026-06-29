@@ -253,23 +253,26 @@ class SanaEngine(AgentEngine):
     async def post_call_actions(self, conversation: list, call_id: str, caller_phone: str = "", complaint_id: Optional[int] = None) -> None:
         log.info(f"[{call_id}] Post-call actions starting ({len(conversation)} turns)")
 
-        if len(conversation) < 2:
-            if caller_phone:
-                brief_lead = {
-                    "phone": caller_phone,
-                    "name": None,
-                    "outcome": "incomplete_call",
-                    "lead_temperature": 1,
-                    "summary": "Caller disconnected before conversation could proceed.",
-                }
-                log.info(f"[{call_id}] Brief call — recording in Chatwoot with phone {caller_phone}")
-                await create_chatwoot_lead(brief_lead, conversation, call_id, self.AGENT_NAME, self.cfg)
-            return
+        if self.lead_data and self.lead_data.get('name'):
+            lead = self.lead_data
+        else:
+            if len(conversation) < 2:
+                if caller_phone:
+                    brief_lead = {
+                        "phone": caller_phone,
+                        "name": None,
+                        "outcome": "incomplete_call",
+                        "lead_temperature": 1,
+                        "summary": "Caller disconnected before conversation could proceed.",
+                    }
+                    log.info(f"[{call_id}] Brief call — recording in Chatwoot with phone {caller_phone}")
+                    await create_chatwoot_lead(brief_lead, conversation, call_id, self.AGENT_NAME, self.cfg)
+                return
 
-        lead = await extract_lead_data(conversation, self.AGENT_NAME, self.cfg)
-        if not lead:
-            log.warning(f"[{call_id}] Lead extraction returned empty")
-            return
+            lead = await extract_lead_data(conversation, self.AGENT_NAME, self.cfg)
+            if not lead:
+                log.warning(f"[{call_id}] Lead extraction returned empty")
+                return
 
         if not lead.get('phone') and caller_phone:
             lead['phone'] = caller_phone

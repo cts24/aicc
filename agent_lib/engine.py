@@ -34,7 +34,11 @@ from agent_lib.llm import llm_respond, extract_name_phone, parse_transfer_tag
 from agent_lib.chatwoot import chatwoot_lookup, create_chatwoot_lead
 from agent_lib.ntfy import send_ntfy_notification
 from agent_lib.gmail import send_gmail_notification
-from agent_lib.calendar import book_sales_appointment
+from agent_lib.calendar import (
+    book_sales_appointment, get_available_slots, format_slots_for_prompt, check_and_book,
+    get_bookings_by_phone, get_bookings_by_email, cancel_booking, reschedule_booking,
+)
+from agent_lib.llm import extract_lead_data
 
 log = logging.getLogger(__name__)
 
@@ -125,6 +129,29 @@ class AgentEngine:
         self.offered_goodbye = False
         self.asterisk_channel: Optional[str] = None
         self.transfer_in_progress = False
+        self._system_prompt = self.SYSTEM_PROMPT
+        self.lead_data: dict = {}
+        self._turn_count = 0
+        self._lead_extract_task: Optional[asyncio.Task] = None
+
+    BOOKING_INSTRUCTIONS: ClassVar[str] = (
+        "\n\n## APPOINTMENT BOOKING\n"
+        "You can check availability and book appointments in-call.\n"
+        "When caller agrees on a date and time, use:\n"
+        "  [BOOKING:id=1&date=YYYY-MM-DD&time=HH:MM]\n"
+        "To check what slots are available on a date, use:\n"
+        "  [SLOTS:id=1&date=YYYY-MM-DD]\n"
+        "\n"
+        "## CANCEL / RESCHEDULE\n"
+        "If caller wants to cancel or reschedule, first search by asking for their phone:\n"
+        "  [SEARCH_BOOKINGS:phone=+92XXXXXXXXXX]\n"
+        "System will return their bookings. Present them to caller and confirm.\n"
+        "To cancel a booking:\n"
+        "  [CANCEL_BOOKING:uid=BOOKING_UID]\n"
+        "To reschedule, first check [SLOTS:] for availability, then:\n"
+        "  [RESCHEDULE_BOOKING:uid=BOOKING_UID&date=YYYY-MM-DD&time=HH:MM]\n"
+        "Confirmation will be spoken to caller after each action."
+    )
 
     # ── Must override ──────────────────────────────────────────────────────
 
@@ -160,7 +187,9 @@ class AgentEngine:
 
     async def _on_call_setup(self):
         """Hook after AMI caller-id lookup, before Deepgram session."""
-        pass
+        agent_type = getattr(self.cfg, 'agent_type', '')
+        if agent_type in ('english_sales', 'urdu_sales', 'english_support', 'urdu_support', 'receptionist'):
+            self._system_prompt = self.SYSTEM_PROMPT + self.BOOKING_INSTRUCTIONS
 
     def get_farewell_extra(self) -> str:
         return "Is there anything else I can help you with today?"
@@ -298,16 +327,151 @@ class AgentEngine:
 
     # ── Farewell ──────────────────────────────────────────────────────────
 
-    async def _check_farewell(self, reply: str, lang: str = "en"):
-        if not is_farewell_response(reply, lang):
-            return
-        if self.offered_goodbye:
-            await asyncio.sleep(0.5)
-            if self.stop_event:
-                self.stop_event.set()
-        else:
-            self.offered_goodbye = True
-            await self.speak(self.get_farewell_extra())
+    async def _midcall_lead_extract(self, text: str):
+        """Extract lead data mid-call and store incrementally."""
+        try:
+            lead = await extract_lead_data(self.conversation, self.AGENT_NAME, self.cfg)
+            if lead and lead.get('name'):
+                self.lead_data.update(lead)
+                if lead.get('name'):
+                    self.caller_name = lead['name']
+                if lead.get('phone') and not self.caller_phone:
+                    self.caller_phone = lead['phone']
+                log.info(f"[{self.call_id}] Mid-call lead: {lead.get('name')} | {lead.get('inquiry_type')} | score {lead.get('lead_temperature')}")
+        except Exception as e:
+            log.debug(f"[{self.call_id}] Mid-call lead extract error: {e}")
+
+    async def _handle_booking_action(self, reply: str) -> str:
+        """Handle [SLOTS], [BOOKING], [SEARCH_BOOKINGS], [CANCEL_BOOKING],
+        [RESCHEDULE_BOOKING] tags from LLM response.
+
+        For [SLOTS] / [SEARCH_BOOKINGS]: fetches data, injects into conversation,
+        re-calls LLM. Returns empty str if re-query in progress (reply already added
+        to conversation).
+        For [BOOKING] / [CANCEL_BOOKING] / [RESCHEDULE_BOOKING]: executes and
+        returns modified reply with confirmation message.
+        """
+        import re
+
+        # ── SLOTS: check availability ───────────────────────────────────────
+        slots_match = re.search(r'\[SLOTS:([^\]]+)\]', reply)
+        if slots_match:
+            raw = slots_match.group(1)
+            params = dict(p.split('=') for p in raw.split('&'))
+            event_type_id = int(params.get('id', '1'))
+            date_str = params.get('date', '')
+
+            if not date_str:
+                return reply.replace(slots_match.group(0), '').strip()
+
+            slots = await get_available_slots(event_type_id, date_str)
+            slots_text = format_slots_for_prompt(slots, date_str)
+            info = f"[System: {slots_text}]"
+            self.conversation.append({"role": "system", "content": info})
+
+            re_reply = await llm_respond(self.conversation, self._system_prompt, self.cfg, self.caller_context)
+            self.conversation.pop()
+            if re_reply:
+                self.conversation.append({"role": "assistant", "content": re_reply})
+            return re_reply or ""
+
+        # ── SEARCH_BOOKINGS: find existing bookings ─────────────────────────
+        search_match = re.search(r'\[SEARCH_BOOKINGS:([^\]]+)\]', reply)
+        if search_match:
+            raw = search_match.group(1)
+            params = dict(p.split('=') for p in raw.split('&'))
+            phone = params.get('phone', '')
+            email = params.get('email', '')
+
+            bookings = []
+            if phone:
+                bookings = await get_bookings_by_phone(phone)
+            elif email:
+                bookings = await get_bookings_by_email(email)
+
+            if not bookings:
+                info = "[System: No upcoming bookings found for this caller.]"
+            else:
+                lines = []
+                for b in bookings:
+                    start = datetime.fromisoformat(b['start_time'])
+                    date_str = start.strftime('%B %d, %Y')
+                    time_str = start.strftime('%I:%M %p').lstrip('0')
+                    lines.append(f"  UID: {b['uid'][:8]}… — {date_str} at {time_str} ({b['title']})")
+                info = "[System: Found these upcoming bookings:\n" + "\n".join(lines) + "\n]"
+
+            self.conversation.append({"role": "system", "content": info})
+            re_reply = await llm_respond(self.conversation, self._system_prompt, self.cfg, self.caller_context)
+            self.conversation.pop()
+            if re_reply:
+                self.conversation.append({"role": "assistant", "content": re_reply})
+            return re_reply or ""
+
+        # ── BOOKING: create new booking ────────────────────────────────────
+        booking_match = re.search(r'\[BOOKING:([^\]]+)\]', reply)
+        if booking_match:
+            raw = booking_match.group(1)
+            params = dict(p.split('=') for p in raw.split('&'))
+            event_type_id = int(params.get('id', '1'))
+            date_str = params.get('date', '')
+            time_str = params.get('time', '')
+            name = params.get('name', self.caller_name or 'Caller')
+            email = params.get('email', 'caller@psba.gov.pk')
+            phone = params.get('phone', self.caller_phone or '')
+
+            if not date_str or not time_str:
+                return reply.replace(booking_match.group(0),
+                    "I need a date and time to make the booking.").strip()
+
+            success, msg = await check_and_book(event_type_id, date_str, time_str, name, email, phone)
+            if success:
+                confirm = f"Perfect! I've booked your appointment for {date_str} at {time_str}. You will receive a confirmation."
+                return reply.replace(booking_match.group(0), confirm).strip()
+            else:
+                return reply.replace(booking_match.group(0),
+                    f"Sorry, I couldn't complete the booking: {msg}").strip()
+
+        # ── CANCEL_BOOKING ─────────────────────────────────────────────────
+        cancel_match = re.search(r'\[CANCEL_BOOKING:([^\]]+)\]', reply)
+        if cancel_match:
+            raw = cancel_match.group(1)
+            params = dict(p.split('=') for p in raw.split('&'))
+            uid = params.get('uid', '')
+
+            if not uid:
+                return reply.replace(cancel_match.group(0), '').strip()
+
+            cancelled = await cancel_booking(uid)
+            if cancelled:
+                confirm = "Done! Your appointment has been cancelled successfully."
+                return reply.replace(cancel_match.group(0), confirm).strip()
+            else:
+                return reply.replace(cancel_match.group(0),
+                    "I'm sorry, I was unable to cancel the booking. Please try again.").strip()
+
+        # ── RESCHEDULE_BOOKING ────────────────────────────────────────────
+        resched_match = re.search(r'\[RESCHEDULE_BOOKING:([^\]]+)\]', reply)
+        if resched_match:
+            raw = resched_match.group(1)
+            params = dict(p.split('=') for p in raw.split('&'))
+            uid = params.get('uid', '')
+            date_str = params.get('date', '')
+            time_str = params.get('time', '')
+
+            if not uid or not date_str or not time_str:
+                return reply.replace(resched_match.group(0),
+                    "I need the booking details and the new time to reschedule.").strip()
+
+            new_start = f"{date_str}T{time_str}:00+05:00"
+            result = await reschedule_booking(uid, new_start)
+            if "error" in result:
+                return reply.replace(resched_match.group(0),
+                    f"Sorry, rescheduling failed: {result['error']}").strip()
+            else:
+                confirm = f"Done! Your appointment has been rescheduled to {date_str} at {time_str}."
+                return reply.replace(resched_match.group(0), confirm).strip()
+
+        return reply
 
     # ── Transfer ──────────────────────────────────────────────────────────
 
@@ -357,7 +521,7 @@ class AgentEngine:
         bgtasks = await self.on_before_llm(text)
 
         llm_task = asyncio.create_task(
-            llm_respond(self.conversation, self.SYSTEM_PROMPT, self.cfg, self.caller_context)
+            llm_respond(self.conversation, self._system_prompt, self.cfg, self.caller_context)
         )
         if self.filler_audios:
             await self.play_audio(random.choice(self.filler_audios))
@@ -389,9 +553,28 @@ class AgentEngine:
             self.thinking = False
             return
 
+        # ── In-call booking actions (SLOTS, BOOKING, SEARCH_BOOKINGS, CANCEL, RESCHEDULE) ──
+        booking_tags = ('[SLOTS:', '[BOOKING:', '[SEARCH_BOOKINGS:', '[CANCEL_BOOKING:', '[RESCHEDULE_BOOKING:')
+        if any(t in reply for t in booking_tags):
+            try:
+                reply = await self._handle_booking_action(reply)
+            except Exception as e:
+                log.error(f"[{self.call_id}] Booking action error: {e}")
+                reply = "Sorry, I'm having trouble with the booking system. Please try again."
+
+            if not reply:
+                self.thinking = False
+                return
+
         await self.speak(reply)
         self.thinking = False
         await self._check_farewell(reply)
+
+        # ── Mid-call lead extraction (every 4 turns) ────────────────────
+        self._turn_count += 1
+        if self._turn_count >= 4 and (self._lead_extract_task is None or self._lead_extract_task.done()):
+            self._turn_count = 0
+            self._lead_extract_task = asyncio.create_task(self._midcall_lead_extract(text))
 
     # ── Greeting ──────────────────────────────────────────────────────────
 

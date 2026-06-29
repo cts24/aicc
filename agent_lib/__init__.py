@@ -9,7 +9,11 @@ from .ami import AMIClient, get_caller_id
 from .chatwoot import chatwoot_lookup, create_chatwoot_lead
 from .ntfy import send_ntfy_notification
 from .gmail import send_gmail_notification
-from .calendar import book_sales_appointment
+from .calendar import (
+    book_sales_appointment, get_available_slots, create_booking,
+    get_bookings_by_email, get_bookings_by_phone, cancel_booking,
+    reschedule_booking, format_slots_for_prompt, check_and_book, get_event_types,
+)
 from .odoo import OdooClient
 from .llm import llm_respond, extract_name_phone, extract_lead_data, parse_transfer_tag
 from .prompt_builder import build_agent_prompt
